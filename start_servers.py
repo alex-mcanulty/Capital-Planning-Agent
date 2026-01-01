@@ -53,6 +53,14 @@ def main():
     )
     time.sleep(2)
 
+    # Start MCP Server
+    start_powershell_server(
+        "MCP Server (streamable-http on port 8002)",
+        "uv run python -m mcp_server.main --transport streamable-http --port 8002",
+        cwd=base_dir
+    )
+    time.sleep(2)
+
     # Start Frontend
     frontend_dir = base_dir / "frontend"
     start_powershell_server(
@@ -69,7 +77,8 @@ def main():
     print("Services running:")
     print("  - OIDC Server:    http://localhost:8000    (PowerShell window 1)")
     print("  - Services API:   http://localhost:8001    (PowerShell window 2)")
-    print("  - Frontend:       http://localhost:8080    (PowerShell window 3)")
+    print("  - MCP Server:     http://localhost:8002    (PowerShell window 3)")
+    print("  - Frontend:       http://localhost:8080    (PowerShell window 4)")
     print()
     print("Open http://localhost:8080 in your browser to start testing")
     print()

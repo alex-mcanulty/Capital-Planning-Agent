@@ -21,18 +21,23 @@ python start_servers.py
 
 Terminal 1 - OIDC Server:
 ```bash
-python -m oidc_server.main
+uv run python -m oidc_server.main
 ```
 
 Terminal 2 - Services API:
 ```bash
-python -m services.main
+uv run python -m services.main
 ```
 
-Terminal 3 - Frontend:
+Terminal 3 - MCP Server:
+```bash
+uv run python -m mcp_server.main --transport streamable-http --port 8002
+```
+
+Terminal 4 - Frontend:
 ```bash
 cd frontend
-python -m http.server 8080
+uv run python -m http.server 8080
 ```
 
 ### 3. Open the Frontend
@@ -91,13 +96,16 @@ The access token lifetime is intentionally set to **10 seconds** to demonstrate 
 │  Frontend   │ (http://localhost:8080)
 └──────┬──────┘
        │
-       ├──────────────────┐
-       │                  │
-       ▼                  ▼
-┌─────────────┐    ┌─────────────┐
-│ OIDC Server │    │ Services API│
-│   :8000     │    │    :8001    │
-└─────────────┘    └─────────────┘
+       ├──────────────────┬──────────────────┐
+       │                  │                  │
+       ▼                  ▼                  ▼
+┌─────────────┐    ┌─────────────┐    ┌─────────────┐
+│ OIDC Server │    │ Services API│    │  MCP Server │
+│   :8000     │    │    :8001    │    │    :8002    │
+└─────────────┘    └──────┬──────┘    └──────┬──────┘
+                          │                  │
+                          └──────────────────┘
+                          (MCP calls Services with token management)
 ```
 
 ### OIDC Server (port 8000)
@@ -112,6 +120,12 @@ The access token lifetime is intentionally set to **10 seconds** to demonstrate 
 - Investment Service (POST /investments/optimize)
 - JWT verification using OIDC server's JWKS
 - Scope-based authorization
+
+### MCP Server (port 8002)
+- Stateful MCP server with token management
+- Transparently refreshes access tokens before API calls
+- Scope-based authorization enforcement
+- Tools: get_assets, get_asset, analyze_risk, optimize_investments
 
 ### Frontend (port 8080)
 - Login interface with OAuth 2.0 authorization code flow
@@ -164,6 +178,22 @@ The access token lifetime is intentionally set to **10 seconds** to demonstrate 
 - `POST /risk/analyze` - Analyze asset risks
 - `POST /investments/optimize` - Optimize investment plan
 
+## MCP Server Tools
+
+The MCP server exposes the following tools for agent workflows:
+
+### Authentication
+- `capital_authenticate` - Establish an authenticated session with tokens
+
+### Capital Planning Tools
+- `capital_get_assets` - Fetch all infrastructure assets in a portfolio
+- `capital_get_asset` - Fetch detailed information about a specific asset
+- `capital_analyze_risk` - Analyze failure risk for specified assets
+- `capital_optimize_investments` - Generate optimized investment plan within budget
+- `capital_session_info` - Get current session information and token status
+
+All tools automatically handle token refresh when needed, supporting long-running operations.
+
 ## Development
 
 ### Project Structure
@@ -181,6 +211,13 @@ capital-planner/
 │   ├── auth.py
 │   ├── mock_data.py
 │   └── models.py
+├── mcp_server/          # MCP server with token management
+│   ├── main.py
+│   ├── token_manager.py
+│   ├── api_client.py
+│   ├── tools.py
+│   ├── models.py
+│   └── config.py
 └── frontend/            # Web UI
     ├── index.html
     ├── app.js
@@ -207,9 +244,9 @@ ENDPOINT_DELAYS = {
 
 ## Next Steps
 
-This implementation provides the foundation for:
-- MCP Server with token management
+The MCP server is complete! Next steps:
 - LangGraph Agent for agentic orchestration
+- Integration with Claude desktop or other MCP clients
 - Multi-step workflows with transparent auth handling
 
 See DESIGN.md for the complete architecture plan.
