@@ -305,6 +305,65 @@ class TokenManager:
         return session.scopes.copy()
 
     # ==========================================================================
+    # Heartbeat Token Refresh
+    # ==========================================================================
+
+    async def refresh_all_sessions(self) -> dict:
+        """Refresh tokens for all active sessions.
+
+        This method is called by the global heartbeat to proactively refresh
+        tokens before they expire, ensuring long-running workflows don't fail
+        due to token expiration.
+
+        Returns:
+            Dictionary with refresh statistics:
+            - total_sessions: Total number of sessions
+            - refreshed: Number of sessions successfully refreshed
+            - skipped: Number of sessions skipped (token still valid)
+            - failed: Number of sessions that failed to refresh
+            - errors: List of error messages
+        """
+        stats = {
+            "total_sessions": len(self._sessions),
+            "refreshed": 0,
+            "skipped": 0,
+            "failed": 0,
+            "errors": []
+        }
+
+        now = utc_now()
+        buffer = timedelta(seconds=TOKEN_REFRESH_BUFFER_SECONDS)
+
+        for session_id, session in list(self._sessions.items()):
+            try:
+                # Check if access token is still valid
+                if session.access_token_expires_at > now + buffer:
+                    stats["skipped"] += 1
+                    continue
+
+                # Check if refresh token is still valid
+                if session.refresh_token_expires_at <= now:
+                    error_msg = f"Session {session_id[:8]}... has expired refresh token"
+                    if LOG_TOKEN_EVENTS:
+                        logger.warning(f"[TokenManager] Heartbeat: {error_msg}")
+                    stats["failed"] += 1
+                    stats["errors"].append(error_msg)
+                    continue
+
+                # Refresh the tokens
+                await self._refresh_tokens(session)
+                stats["refreshed"] += 1
+
+            except Exception as e:
+                error_msg = f"Session {session_id[:8]}... refresh failed: {str(e)}"
+                if LOG_TOKEN_EVENTS:
+                    logger.error(f"[TokenManager] Heartbeat: {error_msg}")
+                stats["failed"] += 1
+                stats["errors"].append(error_msg)
+
+        return stats
+
+    # ==========================================================================
     # Debug/Demo Utilities
     # ==========================================================================
 

@@ -50,6 +50,14 @@ class Asset(BaseModel):
     current_age_years: int
 
 
+class InterventionOption(BaseModel):
+    """A recommended intervention option for an asset."""
+    intervention_type: str
+    description: str
+    estimated_cost: float
+    expected_risk_reduction: float = Field(..., ge=0.0, le=1.0)
+
+
 class AssetRisk(BaseModel):
     """Risk assessment for a single asset."""
     asset_id: str
@@ -57,6 +65,7 @@ class AssetRisk(BaseModel):
     consequence_score: float = Field(..., ge=0.0, le=10.0)
     risk_score: float = Field(..., ge=0.0, le=10.0)
     condition_assessment: str
+    recommended_interventions: list[InterventionOption] = Field(default_factory=list)
 
 
 class RiskAnalysisResponse(BaseModel):

@@ -74,6 +74,74 @@ def get_asset_by_id(asset_id: str) -> Asset:
     return None
 
 
+def generate_intervention_options(asset: Asset, probability_of_failure: float) -> list[dict]:
+    """Generate intervention options based on asset condition and risk.
+
+    Returns a list of intervention options with costs and expected risk reductions.
+    The options are tailored to the asset's condition and type.
+    """
+    interventions = []
+
+    # Base costs for different intervention types
+    replacement_cost = asset.replacement_cost
+
+    # REPLACE - Complete replacement (highest cost, highest risk reduction)
+    # Available for all conditions, especially critical/poor
+    if asset.condition in ["critical", "poor", "fair"]:
+        interventions.append({
+            "intervention_type": "replace",
+            "description": f"Complete replacement of {asset.name}",
+            "estimated_cost": round(replacement_cost, 2),
+            "expected_risk_reduction": round(min(0.95, probability_of_failure * 0.98), 4)
+        })
+
+    # REHABILITATE - Major overhaul (medium-high cost, good risk reduction)
+    # Available for poor/fair condition
+    if asset.condition in ["poor", "fair"]:
+        rehab_cost = replacement_cost * random.uniform(0.55, 0.70)
+        interventions.append({
+            "intervention_type": "rehabilitate",
+            "description": f"Major rehabilitation and system upgrade",
+            "estimated_cost": round(rehab_cost, 2),
+            "expected_risk_reduction": round(min(0.80, probability_of_failure * 0.85), 4)
+        })
+
+    # REPAIR - Targeted repairs (medium cost, moderate risk reduction)
+    # Available for poor/fair/good condition
+    if asset.condition in ["poor", "fair", "good"]:
+        repair_cost = replacement_cost * random.uniform(0.25, 0.40)
+        interventions.append({
+            "intervention_type": "repair",
+            "description": f"Targeted repairs to critical components",
+            "estimated_cost": round(repair_cost, 2),
+            "expected_risk_reduction": round(min(0.65, probability_of_failure * 0.70), 4)
+        })
+
+    # PREVENTIVE_MAINTENANCE - Proactive maintenance (low-medium cost, moderate risk reduction)
+    # Available for fair/good/excellent condition
+    if asset.condition in ["fair", "good", "excellent"]:
+        maint_cost = replacement_cost * random.uniform(0.10, 0.20)
+        interventions.append({
+            "intervention_type": "preventive_maintenance",
+            "description": f"Enhanced preventive maintenance program",
+            "estimated_cost": round(maint_cost, 2),
+            "expected_risk_reduction": round(min(0.50, probability_of_failure * 0.55), 4)
+        })
+
+    # MONITORING - Condition monitoring system (low cost, lower risk reduction)
+    # Available for all conditions as a supplementary measure
+    if asset.condition in ["good", "fair", "poor"]:
+        monitor_cost = replacement_cost * random.uniform(0.05, 0.12)
+        interventions.append({
+            "intervention_type": "monitoring",
+            "description": f"Install advanced condition monitoring system",
+            "estimated_cost": round(monitor_cost, 2),
+            "expected_risk_reduction": round(min(0.30, probability_of_failure * 0.35), 4)
+        })
+
+    return interventions
+
+
 def calculate_mock_risk(asset: Asset, horizon_months: int) -> dict:
     """Calculate mock risk scores for an asset"""
     # Simple risk model based on condition and age
@@ -102,11 +170,15 @@ def calculate_mock_risk(asset: Asset, horizon_months: int) -> dict:
 
     risk_score = probability * consequence
 
+    # Generate intervention recommendations based on asset state
+    interventions = generate_intervention_options(asset, probability)
+
     return {
         "probability_of_failure": round(probability, 4),
         "consequence_score": round(consequence, 2),
         "risk_score": round(risk_score, 2),
-        "condition_assessment": asset.condition
+        "condition_assessment": asset.condition,
+        "recommended_interventions": interventions
     }
 
 

@@ -96,8 +96,11 @@ async def analyze_risk(
         asset = get_asset_by_id(asset_id)
         if asset:
             risk_data = calculate_mock_risk(asset, request.horizon_months)
+            # Extract interventions separately since they're in the risk_data dict
+            interventions = risk_data.pop("recommended_interventions", [])
             risks.append(AssetRisk(
                 asset_id=asset_id,
+                recommended_interventions=interventions,
                 **risk_data
             ))
 

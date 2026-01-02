@@ -15,6 +15,11 @@ TOKEN_REFRESH_BUFFER_SECONDS = 2
 # Logging
 LOG_TOKEN_EVENTS = os.getenv("LOG_TOKEN_EVENTS", "true").lower() == "true"
 
+# Token refresh heartbeat (in seconds)
+# This should be less than the refresh token lifetime to prevent expiration
+# For example, if refresh tokens expire in 30s, set this to 25s
+TOKEN_REFRESH_HEARTBEAT_SECONDS = int(os.getenv("TOKEN_REFRESH_HEARTBEAT_SECONDS", "25"))
+
 # Scope to tool mapping - defines which scopes are required for each tool
 TOOL_SCOPE_REQUIREMENTS = {
     "capital_get_assets": ["assets:read"],

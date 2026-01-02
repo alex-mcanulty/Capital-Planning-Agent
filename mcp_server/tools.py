@@ -59,12 +59,23 @@ def format_assets_markdown(assets: list[Asset]) -> str:
 
 def format_risk_markdown(risk: AssetRisk) -> str:
     """Format a single risk assessment as markdown."""
-    return f"""### Asset: {risk.asset_id}
-- **Risk Score**: {risk.risk_score:.2f}/10.0
-- **Probability of Failure**: {risk.probability_of_failure:.1%}
-- **Consequence Score**: {risk.consequence_score:.2f}/10.0
-- **Condition**: {risk.condition_assessment.title()}
-"""
+    lines = [
+        f"### Asset: {risk.asset_id}",
+        f"- **Risk Score**: {risk.risk_score:.2f}/10.0",
+        f"- **Probability of Failure**: {risk.probability_of_failure:.1%}",
+        f"- **Consequence Score**: {risk.consequence_score:.2f}/10.0",
+        f"- **Condition**: {risk.condition_assessment.title()}"
+    ]
+
+    if risk.recommended_interventions:
+        lines.append("\n**Recommended Interventions:**")
+        for i, intervention in enumerate(risk.recommended_interventions, 1):
+            lines.append(f"{i}. **{intervention.intervention_type.replace('_', ' ').title()}**")
+            lines.append(f"   - Description: {intervention.description}")
+            lines.append(f"   - Estimated Cost: ${intervention.estimated_cost:,.2f}")
+            lines.append(f"   - Expected Risk Reduction: {intervention.expected_risk_reduction:.1%}")
+
+    return "\n".join(lines) + "\n"
 
 
 def format_risk_analysis_markdown(response: RiskAnalysisResponse) -> str:

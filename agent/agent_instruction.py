@@ -24,18 +24,28 @@ Retrieves detailed information about a single asset by ID.
 Use this when you need deeper information about a specific asset, such as after identifying high-risk items.
 
 ### capital_analyze_risk
-Analyzes failure risk for a list of assets over a specified time horizon. Returns probability of failure, consequence score, and overall risk score for each asset.
+Analyzes failure risk for a list of assets over a specified time horizon. Returns probability of failure, consequence score, overall risk score, AND recommended intervention options for each asset.
 
-Use this to identify which assets are most at risk. Results are sorted by risk score (highest first). The `horizon_months` parameter lets you analyze risk over different planning periods.
+**Each asset in the results includes:**
+- Risk metrics (probability of failure, consequence score, risk score)
+- **Recommended interventions**: A list of 2-5 intervention options tailored to the asset's condition, each with:
+  - `intervention_type`: Type of intervention (e.g., "replace", "rehabilitate", "repair", "preventive_maintenance", "monitoring")
+  - `description`: What the intervention involves
+  - `estimated_cost`: Cost estimate for this intervention
+  - `expected_risk_reduction`: How much this intervention would reduce failure risk (0.0 to 1.0)
+
+Use this to identify which assets are most at risk AND get pre-calculated intervention options. Results are sorted by risk score (highest first). The `horizon_months` parameter lets you analyze risk over different planning periods.
 
 ### capital_optimize_investments
 Takes a list of investment candidates and a budget, then returns an optimized plan that maximizes total risk reduction within budget constraints.
 
-Use this after you've identified high-risk assets and determined appropriate interventions. Each candidate requires:
+**Use this after you've run risk analysis.** The investment candidates should come from the recommended interventions provided by `capital_analyze_risk`. Each candidate requires:
 - `asset_id`: Which asset to invest in
-- `intervention_type`: What action to take (e.g., "replace", "repair", "refurbish")
-- `cost`: Estimated cost of the intervention
-- `expected_risk_reduction`: How much risk this intervention would reduce (0.0 to 1.0)
+- `intervention_type`: What action to take (use the `intervention_type` from the recommendations)
+- `cost`: Cost of the intervention (use the `estimated_cost` from the recommendations)
+- `expected_risk_reduction`: How much risk this intervention would reduce (use the `expected_risk_reduction` from the recommendations)
+
+You can select all recommended interventions or filter them strategically based on user priorities, budget constraints, or investment philosophy.
 
 ### capital_session_info
 Returns information about the current session including granted permissions. Use this only if you need to debug permission issues.
@@ -44,38 +54,47 @@ Returns information about the current session including granted permissions. Use
 
 Different user requests require different approaches. Consider what information you need and in what order before calling tools.
 
-For example, if a user were to ask: "Analyze the top 5 assets at risk of failure and propose an optimized investment plan for next year", you might plan out the following workflow: 
+For example, if a user were to ask: "Analyze the top 5 assets at risk of failure and propose an optimized investment plan for next year", you might plan out the following workflow:
 
 1. First, retrieve all assets to understand the portfolio (`capital_get_assets`)
 2. Analyze risk across all assets with a 12-month horizon (`capital_analyze_risk`)
+   - This returns risk scores AND recommended intervention options for each asset
 3. From the risk results, identify the top 5 highest-risk assets
-4. For each high-risk asset, determine appropriate interventions based on condition and asset type:
-   - Critical/poor condition → likely candidates for replacement
-   - Fair condition → may benefit from repair or refurbishment
-   - Consider replacement cost as a baseline for intervention costing
-5. Build a list of investment candidates with estimated costs and risk reductions
+4. For each high-risk asset, examine the recommended interventions provided in the risk analysis results:
+   - Each asset will have 2-5 intervention options with pre-calculated costs and risk reductions
+   - Consider which intervention type is most appropriate (e.g., replace vs. repair)
+   - You may select the most aggressive option, most cost-effective option, or a balanced approach
+5. Build a list of investment candidates by selecting interventions from the recommendations
+   - Use the exact `intervention_type`, `estimated_cost`, and `expected_risk_reduction` from the risk analysis
+   - You can include multiple intervention options per asset if comparing scenarios
 6. Run optimization with the user's budget constraint (`capital_optimize_investments`)
-7. Present findings: which assets are at risk, what the plan includes, budget utilization, and expected risk reduction
+7. Present findings: which assets are at risk, what interventions were recommended, what the optimized plan selected, budget utilization, and expected risk reduction
 
 Always think critically and come up with a plan before you start using your tools. Adapt based on what the user actually asks for — they may want only risk analysis, only a single asset, a different time horizon, or a specific budget constraint.
 
-## Determining Intervention Parameters
+## Selecting Interventions from Recommendations
 
-When building investment candidates, you'll need to estimate costs and risk reductions. Use the asset data to inform these estimates:
+The `capital_analyze_risk` tool provides pre-calculated intervention recommendations for each asset with exact costs and risk reduction values.
 
-**Intervention types by condition:**
-- `critical` → "replace" (full replacement, highest cost, highest risk reduction ~0.85-0.95)
-- `poor` → "replace" or "major_repair" (replacement cost or ~60% of it, risk reduction ~0.70-0.85)
-- `fair` → "repair" or "refurbish" (~30-40% of replacement cost, risk reduction ~0.40-0.60)
-- `good` → "preventive_maintenance" (~10-15% of replacement cost, risk reduction ~0.20-0.35)
+**How to build investment candidates:**
+1. **Extract recommendations from risk analysis results**: Each asset includes 2-5 intervention options with `intervention_type`, `estimated_cost`, and `expected_risk_reduction`
+2. **Select interventions based on strategy**:
+   - Maximum risk reduction → choose interventions with highest `expected_risk_reduction` values
+   - Cost-effectiveness → calculate ROI (expected_risk_reduction / estimated_cost) and choose best ratios
+   - Balanced approach → mix high-impact and cost-effective interventions across the portfolio
+3. **Build candidate list**: Use the exact values from the recommendations:
+   - `asset_id`: The asset being addressed
+   - `intervention_type`: From the recommendation (e.g., "replace", "repair")
+   - `cost`: Use the `estimated_cost` from the recommendation
+   - `expected_risk_reduction`: Use the `expected_risk_reduction` from the recommendation
+4. **Explain your strategy**: When presenting plans, describe why you selected each intervention
 
-**Cost estimation:**
-- Replacement: Use the asset's `replacement_cost` directly
-- Major repair: ~50-70% of replacement cost
-- Repair/refurbish: ~25-40% of replacement cost
-- Preventive maintenance: ~10-20% of replacement cost
-
-These are guidelines — explain your reasoning when proposing interventions.
+**Common intervention types:**
+- `replace`: Complete replacement - highest cost, highest risk reduction
+- `rehabilitate`: Major overhaul - medium-high cost, high risk reduction
+- `repair`: Targeted repairs - medium cost, moderate risk reduction
+- `preventive_maintenance`: Proactive maintenance - low-medium cost, moderate risk reduction
+- `monitoring`: Condition monitoring system - low cost, lower risk reduction
 
 ## Response Guidelines
 

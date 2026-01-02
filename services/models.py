@@ -21,12 +21,20 @@ class RiskAnalysisRequest(BaseModel):
     horizon_months: int = Field(..., ge=1, le=120, description="Time horizon in months")
 
 
+class InterventionOption(BaseModel):
+    intervention_type: str
+    description: str
+    estimated_cost: float
+    expected_risk_reduction: float = Field(..., ge=0.0, le=1.0)
+
+
 class AssetRisk(BaseModel):
     asset_id: str
     probability_of_failure: float = Field(..., ge=0.0, le=1.0)
     consequence_score: float = Field(..., ge=0.0, le=10.0)
     risk_score: float = Field(..., ge=0.0, le=10.0)
     condition_assessment: str
+    recommended_interventions: list[InterventionOption] = Field(default_factory=list)
 
 
 class RiskAnalysisResponse(BaseModel):

@@ -10,13 +10,15 @@ Architecture:
 - REST API at /sessions/* for session management (tokens never touch MCP/agent)
 - MCP endpoint at /mcp for agent tool calls
 - TokenManager handles OAuth token lifecycle with automatic refresh
+- Global heartbeat refreshes tokens for all sessions to prevent expiration
 
 Run with:
     uvicorn mcp_server.main:app --port 8002
-    
+
 Or:
     python -m mcp_server.main
 """
+import asyncio
 import logging
 import sys
 from contextlib import asynccontextmanager
@@ -26,7 +28,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from mcp.server.fastmcp import FastMCP
 
-from .config import TOOL_SCOPE_REQUIREMENTS
+from .config import TOOL_SCOPE_REQUIREMENTS, TOKEN_REFRESH_HEARTBEAT_SECONDS
 from .models import (
     GetAssetsInput,
     GetAssetInput,
@@ -288,24 +290,90 @@ async def capital_session_info() -> str:
 
 
 # ==============================================================================
+# Token Refresh Heartbeat
+# ==============================================================================
+
+# Global heartbeat task reference
+_heartbeat_task: Optional[asyncio.Task] = None
+
+
+async def token_refresh_heartbeat():
+    """Background task that periodically refreshes tokens for all sessions.
+
+    This runs independently of tool calls to ensure tokens don't expire
+    during long-running workflows or long-duration individual tool calls.
+    """
+    logger.info(
+        f"[Heartbeat] Token refresh heartbeat started "
+        f"(interval: {TOKEN_REFRESH_HEARTBEAT_SECONDS}s)"
+    )
+
+    try:
+        while True:
+            await asyncio.sleep(TOKEN_REFRESH_HEARTBEAT_SECONDS)
+
+            try:
+                stats = await token_manager.refresh_all_sessions()
+
+                if stats["total_sessions"] > 0:
+                    logger.info(
+                        f"[Heartbeat] Refresh cycle complete: "
+                        f"total={stats['total_sessions']}, "
+                        f"refreshed={stats['refreshed']}, "
+                        f"skipped={stats['skipped']}, "
+                        f"failed={stats['failed']}"
+                    )
+
+                    if stats["failed"] > 0:
+                        logger.warning(
+                            f"[Heartbeat] {stats['failed']} session(s) failed to refresh: "
+                            f"{stats['errors']}"
+                        )
+
+            except Exception as e:
+                logger.error(f"[Heartbeat] Error during refresh cycle: {e}", exc_info=True)
+                # Don't crash the heartbeat - log and continue
+
+    except asyncio.CancelledError:
+        logger.info("[Heartbeat] Token refresh heartbeat stopped")
+        raise
+
+
+# ==============================================================================
 # Combined ASGI Application (REST + MCP)
 # ==============================================================================
 
 @asynccontextmanager
 async def app_lifespan(app: FastAPI):
     """Combined lifespan for REST API and MCP server.
-    
+
     The MCP session manager must be started for streamable HTTP to work.
     Our TokenManager/SessionManager are initialized at module level.
+    Starts the global token refresh heartbeat.
     """
+    global _heartbeat_task
+
     logger.info("[Server] Starting Capital Planning API + MCP Server")
-    
+
+    # Start the token refresh heartbeat
+    _heartbeat_task = asyncio.create_task(token_refresh_heartbeat())
+    logger.info("[Server] Token refresh heartbeat task started")
+
     # Start MCP's session manager (required for streamable HTTP transport)
     async with mcp.session_manager.run():
         yield
-    
+
     # Cleanup on shutdown
     logger.info("[Server] Shutting down...")
+
+    # Cancel the heartbeat task
+    if _heartbeat_task:
+        _heartbeat_task.cancel()
+        try:
+            await asyncio.wait_for(_heartbeat_task, timeout=5.0)
+        except (asyncio.CancelledError, asyncio.TimeoutError):
+            pass
+
     await api_client.close()
     await token_manager.close()
 
