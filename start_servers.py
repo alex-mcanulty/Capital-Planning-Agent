@@ -56,7 +56,7 @@ def main():
     # Start MCP Server
     start_powershell_server(
         "MCP Server (streamable-http on port 8002)",
-        "uv run python -m mcp_server.main --transport streamable-http --port 8002",
+        "uv run python -m mcp_server.main",
         cwd=base_dir
     )
     time.sleep(2)

@@ -70,6 +70,7 @@ async def app_lifespan():
 mcp = FastMCP(
     "capital_planning_mcp",
     lifespan=app_lifespan,
+    port=8002
 )
 
 
@@ -337,30 +338,30 @@ async def capital_session_info() -> str:
 
 def main():
     """Run the MCP server."""
-    import argparse
+    # import argparse
     
-    parser = argparse.ArgumentParser(description="Capital Planning MCP Server")
-    parser.add_argument(
-        "--transport",
-        choices=["stdio", "streamable-http"],
-        default="stdio",
-        help="Transport mechanism (default: stdio)"
-    )
-    parser.add_argument(
-        "--port",
-        type=int,
-        default=8002,
-        help="Port for HTTP transport (default: 8002)"
-    )
+    # parser = argparse.ArgumentParser(description="Capital Planning MCP Server")
+    # parser.add_argument(
+    #     "--transport",
+    #     choices=["stdio", "streamable-http"],
+    #     default="stdio",
+    #     help="Transport mechanism (default: stdio)"
+    # )
+    # parser.add_argument(
+    #     "--port",
+    #     type=int,
+    #     default=8002,
+    #     help="Port for HTTP transport (default: 8002)"
+    # )
     
-    args = parser.parse_args()
+    # args = parser.parse_args()
     
-    if args.transport == "streamable-http":
-        logger.info(f"[MCP Server] Starting with streamable HTTP on port {args.port}")
-        mcp.run(transport="streamable-http", port=args.port)
-    else:
-        logger.info("[MCP Server] Starting with stdio transport")
-        mcp.run()
+    # if args.transport == "streamable-http":
+    logger.info(f"[MCP Server] Starting with streamable HTTP on port 8002")
+    mcp.run(transport="streamable-http")
+    # else:
+    #     logger.info("[MCP Server] Starting with stdio transport")
+    #     mcp.run()
 
 
 if __name__ == "__main__":

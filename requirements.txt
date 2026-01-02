@@ -3,6 +3,7 @@ fastapi>=0.109.0
 uvicorn[standard]>=0.27.0
 pydantic>=2.5.0
 python-multipart>=0.0.6
+mcp>=1.0.0
 
 # JWT and crypto
 PyJWT>=2.8.0
@@ -13,3 +14,10 @@ httpx>=0.26.0
 
 # CORS
 python-jose[cryptography]>=3.3.0
+python-dotenv>=1.0.0
+
+# Agent dependencies
+langchain
+langchain_mcp_adapters
+langchain_openai
+gradio
