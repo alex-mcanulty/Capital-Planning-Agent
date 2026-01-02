@@ -44,7 +44,8 @@ async def lifespan(app: FastAPI):
 
     # Initialize LLM
     llm = ChatOpenAI(
-        model_name="gpt-5-mini-2025-08-07"
+        model_name="gpt-5-mini-2025-08-07",
+        temperature=0
     )
 
     # Initialize MCP client
@@ -154,23 +155,30 @@ async def stream_agent_response(
         # Track current message
         current_message_content = ""
         message_started = False
+        chunk_count = 0
+
+        logger.info(f"[Agent] Starting to stream response for message: {user_message[:50]}...")
 
         # Stream agent responses
         async for chunk in agent.astream({"messages": lc_messages}):
-            logger.debug(f"[Agent] Chunk: {chunk}")
+            chunk_count += 1
+            logger.info(f"[Agent] Chunk #{chunk_count}: {chunk.keys() if isinstance(chunk, dict) else type(chunk)}")
 
             message_type = next(iter(chunk))
+            logger.info(f"[Agent] Message type: {message_type}")
 
             if message_type == "tools":
                 # Tool call event
                 for step in chunk["tools"]:
                     tool_name = chunk[message_type]['messages'][0].name
+                    logger.info(f"[Agent] Tool call: {tool_name}")
                     yield f"event: tool_call\n"
                     yield f"data: {tool_name}\n\n"
 
             elif message_type == "model":
                 # Message content from model
                 chunk_content = chunk[message_type]['messages'][0].content
+                logger.info(f"[Agent] Model content (raw, {len(chunk_content)} chars): {chunk_content[:200]}...")
 
                 # Remove thinking tags if present
                 chunk_content = chunk_content.split("</think>")[-1].strip()
@@ -180,20 +188,33 @@ async def stream_agent_response(
 
                 # Send message_start event if not started
                 if not message_started:
+                    logger.info("[Agent] Sending message_start event")
                     yield f"event: message_start\n"
                     yield f"data: assistant\n\n"
                     message_started = True
 
                 # Send content chunk
+                # For SSE, multi-line data must be sent as multiple "data:" lines
+                logger.info(f"[Agent] Sending message_chunk ({len(chunk_content)} chars): {chunk_content[:200]}...")
                 yield f"event: message_chunk\n"
-                yield f"data: {chunk_content}\n\n"
+
+                # Split content by newlines and send each line as a separate data: field
+                for line in chunk_content.split('\n'):
+                    yield f"data: {line}\n"
+                yield f"\n"  # Empty line to end the SSE message
 
                 current_message_content = chunk_content
+            else:
+                logger.warning(f"[Agent] Unexpected message type: {message_type}")
 
         # Send message_end event
+        logger.info(f"[Agent] Stream complete. Total chunks: {chunk_count}, message_started: {message_started}")
         if message_started:
+            logger.info("[Agent] Sending message_end event")
             yield f"event: message_end\n"
             yield f"data: \n\n"
+        else:
+            logger.warning("[Agent] Stream ended but no message was started!")
 
     except Exception as e:
         logger.error(f"[Agent] Error during streaming: {e}", exc_info=True)

@@ -202,39 +202,56 @@ async function streamAgentResponse(message, assistantMessageId) {
 
         buffer += decoder.decode(value, { stream: true });
 
-        // Process complete SSE messages
-        const lines = buffer.split('\n');
-        buffer = lines.pop(); // Keep incomplete line in buffer
+        // Process complete SSE messages (messages end with double newline)
+        const messages = buffer.split('\n\n');
+        buffer = messages.pop(); // Keep incomplete message in buffer
 
-        for (const line of lines) {
-            if (line.startsWith('event: ')) {
-                const eventType = line.substring(7);
-                const nextLine = lines[lines.indexOf(line) + 1];
+        for (const message of messages) {
+            if (!message.trim()) continue;
 
-                if (nextLine && nextLine.startsWith('data: ')) {
-                    const data = nextLine.substring(6);
+            const lines = message.split('\n');
+            let eventType = null;
+            let dataLines = [];
 
-                    if (eventType === 'message_start') {
-                        messageStarted = true;
-                        updateMessageContent(assistantMessageId, '');
-                    } else if (eventType === 'message_chunk') {
-                        currentMessageContent = data;
-                        updateMessageContent(assistantMessageId, currentMessageContent);
-                    } else if (eventType === 'tool_call') {
-                        addToolCallIndicator(data);
-                    } else if (eventType === 'message_end') {
-                        // Message complete - add to history
-                        if (currentMessageContent) {
-                            chatHistory.push({
-                                role: 'assistant',
-                                content: currentMessageContent
-                            });
-                        }
-                    } else if (eventType === 'error') {
-                        updateMessageContent(assistantMessageId, `❌ Error: ${data}`);
-                        throw new Error(data);
-                    }
+            for (const line of lines) {
+                if (line.startsWith('event: ')) {
+                    eventType = line.substring(7).trim();
+                } else if (line.startsWith('data: ')) {
+                    dataLines.push(line.substring(6));
                 }
+            }
+
+            if (!eventType) continue;
+
+            // Join multiple data: lines with newlines to reconstruct original content
+            const data = dataLines.join('\n');
+
+            console.log(`[Chatbot] SSE Event: ${eventType}, data length: ${data.length}`);
+
+            if (eventType === 'message_start') {
+                console.log('[Chatbot] Message started');
+                messageStarted = true;
+                updateMessageContent(assistantMessageId, '');
+            } else if (eventType === 'message_chunk') {
+                console.log(`[Chatbot] Message chunk (${data.length} chars): ${data.substring(0, 100)}...`);
+                currentMessageContent = data;
+                updateMessageContent(assistantMessageId, currentMessageContent);
+            } else if (eventType === 'tool_call') {
+                console.log(`[Chatbot] Tool call: ${data}`);
+                addToolCallIndicator(data);
+            } else if (eventType === 'message_end') {
+                console.log('[Chatbot] Message ended');
+                // Message complete - add to history
+                if (currentMessageContent) {
+                    chatHistory.push({
+                        role: 'assistant',
+                        content: currentMessageContent
+                    });
+                }
+            } else if (eventType === 'error') {
+                console.error(`[Chatbot] Error event: ${data}`);
+                updateMessageContent(assistantMessageId, `❌ Error: ${data}`);
+                throw new Error(data);
             }
         }
     }
