@@ -32,20 +32,19 @@ os.environ["LANGSMITH_TRACING"] = "true"
 # Global variables for agent and MCP client
 llm = None
 mcp_client = None
-mcp_tools = None
 agent = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Initialize and cleanup resources."""
-    global llm, mcp_client, mcp_tools, agent
+    global llm, mcp_client, agent
 
     logger.info("[Agent] Starting Capital Planning Agent Service")
 
     # Initialize LLM
     llm = ChatOpenAI(
-        model_name="gpt-4o-mini-2024-07-18"
+        model_name="gpt-5-mini-2025-08-07"
     )
 
     # Initialize MCP client
@@ -53,7 +52,7 @@ async def lifespan(app: FastAPI):
         {
             "capital_planner_tools": {
                 "transport": "http",
-                "url": "http://localhost:8002/mcp",
+                "url": "http://localhost:8002/mcp/streamable",
             }
         }
     )
@@ -114,12 +113,6 @@ class ChatRequest(BaseModel):
         default_factory=list,
         description="Conversation history"
     )
-    # Authentication tokens from frontend user
-    access_token: str = Field(..., description="User's access token from OIDC")
-    refresh_token: str = Field(..., description="User's refresh token from OIDC")
-    expires_in: int = Field(..., description="Access token lifetime in seconds")
-    scopes: list[str] = Field(..., description="User's granted scopes")
-    user_id: str = Field(..., description="User identifier (sub claim)")
 
 
 # ==============================================================================
@@ -136,52 +129,10 @@ async def health():
     }
 
 
-async def authenticate_mcp_session(
-    access_token: str,
-    refresh_token: str,
-    expires_in: int,
-    scopes: list[str],
-    user_id: str
-) -> None:
-    """Authenticate with the MCP server using user's tokens.
-
-    This establishes a session in the MCP server that will be used
-    for all subsequent tool calls. The MCP server will automatically
-    refresh the tokens as needed.
-    """
-    # Find the capital_authenticate tool
-    authenticate_tool = None
-    for tool in mcp_tools:
-        if hasattr(tool, 'name') and tool.name == 'capital_authenticate':
-            authenticate_tool = tool
-            break
-
-    if not authenticate_tool:
-        raise RuntimeError("capital_authenticate tool not found in MCP tools")
-
-    # Invoke the authentication tool
-    result = await authenticate_tool.ainvoke({
-        "access_token": access_token,
-        "refresh_token": refresh_token,
-        "expires_in": expires_in,
-        "refresh_expires_in": 30,  # Default from OIDC config
-        "scopes": scopes,
-        "user_id": user_id
-    })
-
-    logger.info(f"[Agent] MCP session authenticated for user: {user_id}")
-    logger.debug(f"[Agent] Authentication result: {result}")
-
-
 @traceable()
 async def stream_agent_response(
     user_message: str,
-    history: list[ChatMessage],
-    access_token: str,
-    refresh_token: str,
-    expires_in: int,
-    scopes: list[str],
-    user_id: str
+    history: list[ChatMessage]
 ) -> AsyncGenerator[str, None]:
     """Stream agent responses as SSE events.
 
@@ -193,17 +144,6 @@ async def stream_agent_response(
     - error: An error occurred
     """
     try:
-        # First, authenticate with MCP server using user's tokens
-        yield f"event: authenticating\n"
-        yield f"data: Establishing session...\n\n"
-
-        await authenticate_mcp_session(
-            access_token=access_token,
-            refresh_token=refresh_token,
-            expires_in=expires_in,
-            scopes=scopes,
-            user_id=user_id
-        )
         # Convert history to LangChain format
         lc_messages = [
             {"role": msg.role, "content": msg.content}
@@ -279,15 +219,7 @@ async def chat_stream(request: ChatRequest):
         )
 
     return StreamingResponse(
-        stream_agent_response(
-            request.message,
-            request.history,
-            request.access_token,
-            request.refresh_token,
-            request.expires_in,
-            request.scopes,
-            request.user_id
-        ),
+        stream_agent_response(request.message, request.history),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
@@ -308,19 +240,6 @@ async def chat(request: ChatRequest):
             status_code=503,
             detail="Agent not initialized. Please try again later."
         )
-
-    # Authenticate with MCP server
-    try:
-        await authenticate_mcp_session(
-            access_token=request.access_token,
-            refresh_token=request.refresh_token,
-            expires_in=request.expires_in,
-            scopes=request.scopes,
-            user_id=request.user_id
-        )
-    except Exception as e:
-        logger.error(f"[Agent] Authentication failed: {e}", exc_info=True)
-        raise HTTPException(status_code=401, detail=f"Authentication failed: {e}")
 
     # Convert history to LangChain format
     lc_messages = [

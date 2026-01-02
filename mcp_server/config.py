@@ -3,8 +3,8 @@ import os
 
 # OIDC Server Configuration
 OIDC_SERVER_URL = os.getenv("OIDC_SERVER_URL", "http://localhost:8000")
-OIDC_CLIENT_ID = os.getenv("OIDC_CLIENT_ID", "capital-planner-mcp")
-OIDC_CLIENT_SECRET = os.getenv("OIDC_CLIENT_SECRET", "mcp-secret")
+OIDC_CLIENT_ID = os.getenv("OIDC_CLIENT_ID", "capital-planning-client")
+OIDC_CLIENT_SECRET = os.getenv("OIDC_CLIENT_SECRET", "client-secret")
 
 # Capital Planning Services Configuration
 SERVICES_BASE_URL = os.getenv("SERVICES_BASE_URL", "http://localhost:8001")

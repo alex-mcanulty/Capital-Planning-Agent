@@ -163,7 +163,29 @@ function startTokenExpiryMonitor() {
     }, 1000);
 }
 
-function logout() {
+async function logout() {
+    // Delete MCP session if one exists
+    if (window.mcpSessionId) {
+        try {
+            await fetch(`http://localhost:8002/sessions/${window.mcpSessionId}`, {
+                method: 'DELETE'
+            });
+            console.log('[App] MCP session deleted');
+        } catch (error) {
+            console.error('[App] Failed to delete MCP session:', error);
+        }
+        window.mcpSessionId = null;
+    }
+
+    // Clear chatbot state
+    if (window.chatHistory) {
+        window.chatHistory = [];
+    }
+    const chatbotMessages = document.getElementById('chatbot-messages');
+    if (chatbotMessages) {
+        chatbotMessages.innerHTML = '';
+    }
+
     accessToken = null;
     refreshToken = null;
     tokenExpiry = null;

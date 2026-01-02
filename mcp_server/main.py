@@ -116,7 +116,13 @@ session_manager = SessionManager()
 # Create MCP server with stateless_http=True
 # Our TokenManager handles application-level session state, so we don't need
 # MCP protocol-level session state. This simplifies mounting into FastAPI.
-mcp = FastMCP("capital_planning_mcp", stateless_http=True)
+# Set streamable_http_path to "/streamable" so we can mount the app at "/mcp"
+# making the endpoint accessible at /mcp/streamable
+mcp = FastMCP(
+    "capital_planning_mcp",
+    stateless_http=True,
+    streamable_http_path="/streamable"
+)
 
 
 @mcp.tool(
@@ -325,8 +331,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Mount MCP server at /mcp
-app.mount("/mcp", mcp.streamable_http_app())
+# Mount MCP streamable HTTP app at /mcp
+# With streamable_http_path="/streamable", the full endpoint will be /mcp/streamable
+from starlette.routing import Mount
+app.routes.append(Mount("/mcp", app=mcp.streamable_http_app()))
 
 
 # ==============================================================================
@@ -353,11 +361,13 @@ async def health():
 )
 async def create_session(request: CreateSessionRequest):
     """Create a new authenticated session.
-    
+
     The frontend calls this endpoint with tokens obtained from the OIDC server.
     This keeps tokens out of the agent/LLM conversation entirely.
     """
     try:
+        logger.info(f"[REST API] Creating session for user: {request.user_id}, scopes: {request.scopes}")
+
         session_id = await token_manager.create_session(
             access_token=request.access_token,
             refresh_token=request.refresh_token,
@@ -366,7 +376,7 @@ async def create_session(request: CreateSessionRequest):
             scopes=request.scopes,
             user_id=request.user_id,
         )
-        
+
         return SessionResponse(
             session_id=session_id,
             user_id=request.user_id,

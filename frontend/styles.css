@@ -468,4 +468,7 @@ body {
     padding: 12px 24px;
     height: fit-content;
     align-self: flex-end;
+    white-space: nowrap;
+    flex-shrink: 0;
+    width: auto !important; /* Override .btn-primary width: 100% */
 }
