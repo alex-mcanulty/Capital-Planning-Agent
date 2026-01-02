@@ -61,6 +61,14 @@ def main():
     )
     time.sleep(2)
 
+    # Start Agent Service
+    start_powershell_server(
+        "Agent Service (port 8003)",
+        "uv run python -m agent.main",
+        cwd=base_dir
+    )
+    time.sleep(2)
+
     # Start Frontend
     frontend_dir = base_dir / "frontend"
     start_powershell_server(
@@ -78,7 +86,8 @@ def main():
     print("  - OIDC Server:    http://localhost:8000    (PowerShell window 1)")
     print("  - Services API:   http://localhost:8001    (PowerShell window 2)")
     print("  - MCP Server:     http://localhost:8002    (PowerShell window 3)")
-    print("  - Frontend:       http://localhost:8080    (PowerShell window 4)")
+    print("  - Agent Service:  http://localhost:8003    (PowerShell window 4)")
+    print("  - Frontend:       http://localhost:8080    (PowerShell window 5)")
     print()
     print("Open http://localhost:8080 in your browser to start testing")
     print()

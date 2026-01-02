@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Capital Planning - Authentication Test</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🏗️</text></svg>">
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -109,9 +110,26 @@
                 <h2>Activity Log</h2>
                 <div id="activity-log"></div>
             </div>
+
+            <div class="chatbot-section">
+                <h2>AI Assistant</h2>
+                <div class="chatbot-container">
+                    <div id="chatbot-messages" class="chatbot-messages"></div>
+                    <div class="chatbot-input-container">
+                        <textarea
+                            id="chatbot-input"
+                            class="chatbot-input"
+                            placeholder="Ask the AI assistant to analyze assets, assess risks, or create investment plans..."
+                            rows="2"
+                        ></textarea>
+                        <button id="chatbot-send" class="btn btn-primary">Send</button>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
 
     <script src="app.js"></script>
+    <script src="chatbot.js"></script>
 </body>
 </html>

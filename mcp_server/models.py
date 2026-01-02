@@ -5,6 +5,11 @@ from datetime import datetime, timezone
 from enum import Enum
 
 
+def utc_now() -> datetime:
+    """Get current UTC time with timezone info."""
+    return datetime.now(timezone.utc)
+
+
 # ==============================================================================
 # Token Session Models
 # ==============================================================================
@@ -23,7 +28,7 @@ class TokenSession(BaseModel):
     refresh_token: str = Field(..., description="Current refresh token")
     refresh_token_expires_at: datetime = Field(..., description="Refresh token expiration timestamp")
     scopes: list[str] = Field(default_factory=list, description="Granted scopes")
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), description="Session creation time")
+    created_at: datetime = Field(default_factory=utc_now, description="Session creation time")
     last_refreshed_at: Optional[datetime] = Field(default=None, description="Last token refresh time")
     refresh_count: int = Field(default=0, description="Number of times tokens have been refreshed")
 
@@ -96,6 +101,60 @@ class ResponseFormat(str, Enum):
     """Output format for tool responses."""
     JSON = "json"
     MARKDOWN = "markdown"
+
+
+# ==============================================================================
+# REST API Session Management Models
+# ==============================================================================
+
+class CreateSessionRequest(BaseModel):
+    """Request body for creating a new session via REST API.
+    
+    This is called by the frontend/orchestrator BEFORE starting the agent.
+    Tokens are passed here, not through MCP tools.
+    """
+    model_config = ConfigDict(
+        str_strip_whitespace=True,
+        validate_assignment=True,
+        extra='forbid'
+    )
+
+    access_token: str = Field(..., description="Access token from OIDC server")
+    refresh_token: str = Field(..., description="Refresh token from OIDC server")
+    expires_in: int = Field(..., description="Access token lifetime in seconds", ge=1)
+    refresh_expires_in: int = Field(
+        default=3600,
+        description="Refresh token lifetime in seconds",
+        ge=1
+    )
+    scopes: list[str] = Field(default_factory=list, description="List of granted scopes")
+    user_id: str = Field(..., description="User identifier (sub claim)")
+
+
+class SessionResponse(BaseModel):
+    """Response after creating or activating a session."""
+    session_id: str = Field(..., description="Unique session identifier")
+    user_id: str = Field(..., description="User identifier")
+    scopes: list[str] = Field(..., description="Granted scopes")
+    message: str = Field(..., description="Status message")
+
+
+class SessionInfoResponse(BaseModel):
+    """Detailed session information response."""
+    session_id: str = Field(..., description="Session identifier (truncated for security)")
+    user_id: str = Field(..., description="User identifier")
+    scopes: list[str] = Field(..., description="Granted scopes")
+    access_token_expires_in_seconds: float = Field(..., description="Seconds until access token expires")
+    refresh_token_expires_in_seconds: float = Field(..., description="Seconds until refresh token expires")
+    refresh_count: int = Field(..., description="Number of token refreshes performed")
+    created_at: str = Field(..., description="Session creation timestamp (ISO format)")
+    last_refreshed_at: Optional[str] = Field(None, description="Last refresh timestamp (ISO format)")
+
+
+class ErrorResponse(BaseModel):
+    """Standard error response."""
+    error: str = Field(..., description="Error type")
+    detail: str = Field(..., description="Error details")
 
 
 class GetAssetsInput(BaseModel):

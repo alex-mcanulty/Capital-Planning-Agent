@@ -2,8 +2,23 @@
 
 A stateful MCP server that provides tools for capital planning workflows
 with automatic token management and refresh.
+
+Architecture:
+- Single ASGI application serving both REST API and MCP endpoint
+- REST API at /sessions/* for session management (tokens never touch MCP/agent)
+- MCP endpoint at /mcp for agent tool calls
+- TokenManager handles OAuth token lifecycle with automatic refresh
+
+Run with:
+    uvicorn mcp_server.main:app --port 8002
 """
-from .main import mcp, main, set_current_session, get_current_session
+from .main import (
+    app,
+    mcp,
+    main,
+    session_manager,
+    SessionManager,
+)
 from .token_manager import token_manager, TokenManager, AuthenticationError, AuthorizationError
 from .api_client import api_client, CapitalPlanningAPIClient, APIError
 from .models import (
@@ -14,14 +29,19 @@ from .models import (
     InvestmentCandidate,
     SelectedInvestment,
     InvestmentOptimizationResponse,
+    CreateSessionRequest,
+    SessionResponse,
+    SessionInfoResponse,
 )
 
 __all__ = [
-    # Server
+    # ASGI Application
+    "app",
     "mcp",
     "main",
-    "set_current_session",
-    "get_current_session",
+    # Session management
+    "session_manager",
+    "SessionManager",
     # Token management
     "token_manager",
     "TokenManager",
@@ -39,4 +59,7 @@ __all__ = [
     "InvestmentCandidate",
     "SelectedInvestment",
     "InvestmentOptimizationResponse",
+    "CreateSessionRequest",
+    "SessionResponse",
+    "SessionInfoResponse",
 ]

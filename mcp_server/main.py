@@ -5,16 +5,26 @@ A stateful MCP server that provides tools for capital planning workflows:
 - Risk analysis
 - Investment optimization
 
-The server manages authentication tokens transparently, refreshing them
-as needed to support long-running agent workflows.
+Architecture:
+- Single ASGI application serving both REST API and MCP endpoint
+- REST API at /sessions/* for session management (tokens never touch MCP/agent)
+- MCP endpoint at /mcp for agent tool calls
+- TokenManager handles OAuth token lifecycle with automatic refresh
+
+Run with:
+    uvicorn mcp_server.main:app --port 8002
+    
+Or:
+    python -m mcp_server.main
 """
 import logging
 import sys
 from contextlib import asynccontextmanager
-from typing import Any
+from typing import Optional
 
-from mcp.server.fastmcp import FastMCP, Context
-from pydantic import BaseModel, Field, ConfigDict
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from mcp.server.fastmcp import FastMCP
 
 from .config import TOOL_SCOPE_REQUIREMENTS
 from .models import (
@@ -22,10 +32,12 @@ from .models import (
     GetAssetInput,
     AnalyzeRiskInput,
     OptimizeInvestmentsInput,
-    InvestmentCandidate,
-    ResponseFormat,
+    CreateSessionRequest,
+    SessionResponse,
+    SessionInfoResponse,
+    ErrorResponse,
 )
-from .token_manager import token_manager, AuthenticationError
+from .token_manager import token_manager, AuthenticationError, AuthorizationError
 from .api_client import api_client
 from .tools import (
     get_assets_tool,
@@ -46,126 +58,66 @@ logger = logging.getLogger(__name__)
 
 
 # ==============================================================================
-# Lifespan Management
+# Session State Management
 # ==============================================================================
 
-@asynccontextmanager
-async def app_lifespan():
-    """Manage resources for the server's lifetime."""
-    logger.info("[MCP Server] Starting Capital Planning MCP Server")
+class SessionManager:
+    """Manages the active session for MCP tool calls.
     
-    # Initialize any startup resources
-    yield {
-        "token_manager": token_manager,
-        "api_client": api_client,
-    }
-    
-    # Cleanup on shutdown
-    logger.info("[MCP Server] Shutting down...")
-    await api_client.close()
-    await token_manager.close()
-
-
-# Initialize the MCP server
-mcp = FastMCP(
-    "capital_planning_mcp",
-    lifespan=app_lifespan,
-    port=8002
-)
-
-
-# ==============================================================================
-# Session Management Resources
-# ==============================================================================
-
-# Store current session ID (in a real app, this would be per-connection)
-_current_session_id: str | None = None
-
-
-def set_current_session(session_id: str):
-    """Set the current session ID for tool calls."""
-    global _current_session_id
-    _current_session_id = session_id
-    logger.info(f"[MCP Server] Session set: {session_id[:8]}...")
-
-
-def get_current_session() -> str:
-    """Get the current session ID."""
-    if not _current_session_id:
-        raise AuthenticationError("No session established. Please authenticate first.")
-    return _current_session_id
-
-
-# ==============================================================================
-# Authentication Tool (for establishing sessions)
-# ==============================================================================
-
-class AuthenticateInput(BaseModel):
-    """Input for establishing an authenticated session."""
-    model_config = ConfigDict(extra='forbid')
-    
-    access_token: str = Field(..., description="Access token from OIDC server")
-    refresh_token: str = Field(..., description="Refresh token from OIDC server")
-    expires_in: int = Field(..., description="Access token lifetime in seconds", ge=1)
-    refresh_expires_in: int = Field(
-        default=3600,
-        description="Refresh token lifetime in seconds",
-        ge=1
-    )
-    scopes: list[str] = Field(
-        default_factory=list,
-        description="List of granted scopes"
-    )
-    user_id: str = Field(..., description="User identifier (sub claim)")
-
-
-@mcp.tool(
-    name="capital_authenticate",
-    annotations={
-        "title": "Authenticate Session",
-        "readOnlyHint": False,
-        "destructiveHint": False,
-        "idempotentHint": False,
-        "openWorldHint": True,
-    }
-)
-async def authenticate(params: AuthenticateInput) -> str:
-    """Establish an authenticated session with the Capital Planning services.
-    
-    Call this tool first to set up authentication before using other tools.
-    The session will be maintained and tokens will be refreshed automatically.
-    
-    Args:
-        params: Authentication credentials including tokens and scopes
-        
-    Returns:
-        Confirmation message with session details
+    This is separate from TokenManager - it just tracks WHICH session
+    is currently active for the MCP server to use.
     """
-    session_id = await token_manager.create_session(
-        access_token=params.access_token,
-        refresh_token=params.refresh_token,
-        expires_in=params.expires_in,
-        refresh_expires_in=params.refresh_expires_in,
-        scopes=params.scopes,
-        user_id=params.user_id,
-    )
     
-    set_current_session(session_id)
+    def __init__(self):
+        self._active_session_id: Optional[str] = None
     
-    return f"""## Session Established
+    def set_active_session(self, session_id: str) -> None:
+        """Set the active session for MCP tools."""
+        # Verify session exists
+        session = token_manager.get_session(session_id)
+        if not session:
+            raise AuthenticationError(f"Session not found: {session_id[:16]}...")
+        
+        self._active_session_id = session_id
+        logger.info(f"[SessionManager] Active session set: {session_id[:16]}... (user: {session.user_id})")
+    
+    def get_active_session(self) -> str:
+        """Get the active session ID.
+        
+        Raises:
+            AuthenticationError: If no session is active
+        """
+        if not self._active_session_id:
+            raise AuthenticationError(
+                "No active session. The frontend must create and activate a session "
+                "via POST /sessions and POST /sessions/{id}/activate before using tools."
+            )
+        return self._active_session_id
+    
+    def clear_active_session(self) -> None:
+        """Clear the active session."""
+        self._active_session_id = None
+        logger.info("[SessionManager] Active session cleared")
+    
+    @property
+    def has_active_session(self) -> bool:
+        """Check if there's an active session."""
+        return self._active_session_id is not None
 
-- **User**: {params.user_id}
-- **Scopes**: {', '.join(params.scopes) if params.scopes else 'None'}
-- **Access Token Expires In**: {params.expires_in} seconds
-- **Refresh Token Expires In**: {params.refresh_expires_in} seconds
 
-You can now use the capital planning tools. Tokens will be refreshed automatically.
-"""
+# Global session manager
+session_manager = SessionManager()
 
 
 # ==============================================================================
-# Capital Planning Tools
+# MCP Server (tools only, no auth)
 # ==============================================================================
+
+# Create MCP server with stateless_http=True
+# Our TokenManager handles application-level session state, so we don't need
+# MCP protocol-level session state. This simplifies mounting into FastAPI.
+mcp = FastMCP("capital_planning_mcp", stateless_http=True)
+
 
 @mcp.tool(
     name="capital_get_assets",
@@ -194,7 +146,7 @@ async def capital_get_assets(params: GetAssetsInput) -> str:
     Returns:
         List of assets with id, name, type, condition, age, and cost information
     """
-    session_id = get_current_session()
+    session_id = session_manager.get_active_session()
     return await get_assets_tool(params, session_id)
 
 
@@ -224,7 +176,7 @@ async def capital_get_asset(params: GetAssetInput) -> str:
     Returns:
         Detailed asset information including condition and financial data
     """
-    session_id = get_current_session()
+    session_id = session_manager.get_active_session()
     return await get_asset_tool(params, session_id)
 
 
@@ -246,7 +198,7 @@ async def capital_analyze_risk(params: AnalyzeRiskInput) -> str:
     Results are sorted by risk score (highest first) to identify priority assets.
     
     **Note**: This operation may take several seconds as it performs detailed
-    analysis calculations. The token will be refreshed automatically if needed.
+    analysis calculations.
     
     Required scope: risk:analyze
     
@@ -260,7 +212,7 @@ async def capital_analyze_risk(params: AnalyzeRiskInput) -> str:
         Risk analysis with probability of failure, consequence score, and overall
         risk score for each asset, sorted by risk (highest first)
     """
-    session_id = get_current_session()
+    session_id = session_manager.get_active_session()
     return await analyze_risk_tool(params, session_id)
 
 
@@ -282,7 +234,7 @@ async def capital_optimize_investments(params: OptimizeInvestmentsInput) -> str:
     maximizes total risk reduction within the budget.
     
     **Note**: This operation may take several seconds as it performs optimization
-    calculations. The token will be refreshed automatically if needed.
+    calculations.
     
     Required scope: investments:write
     
@@ -301,7 +253,7 @@ async def capital_optimize_investments(params: OptimizeInvestmentsInput) -> str:
         Optimized investment plan with selected investments, budget usage,
         and total expected risk reduction
     """
-    session_id = get_current_session()
+    session_id = session_manager.get_active_session()
     return await optimize_investments_tool(params, session_id)
 
 
@@ -322,46 +274,259 @@ async def capital_session_info() -> str:
     granted scopes, token expiration times, and refresh statistics.
     Useful for debugging and understanding session state.
     
-    Args:
-        None
-        
     Returns:
         Session information including token status and refresh count
     """
-    session_id = get_current_session()
+    session_id = session_manager.get_active_session()
     return await get_session_info_tool(session_id)
 
 
 # ==============================================================================
-# Server Entry Point
+# Combined ASGI Application (REST + MCP)
+# ==============================================================================
+
+@asynccontextmanager
+async def app_lifespan(app: FastAPI):
+    """Combined lifespan for REST API and MCP server.
+    
+    The MCP session manager must be started for streamable HTTP to work.
+    Our TokenManager/SessionManager are initialized at module level.
+    """
+    logger.info("[Server] Starting Capital Planning API + MCP Server")
+    
+    # Start MCP's session manager (required for streamable HTTP transport)
+    async with mcp.session_manager.run():
+        yield
+    
+    # Cleanup on shutdown
+    logger.info("[Server] Shutting down...")
+    await api_client.close()
+    await token_manager.close()
+
+
+# Create the combined FastAPI application
+app = FastAPI(
+    title="Capital Planning API",
+    description=(
+        "REST API for session management + MCP endpoint for agent tools.\n\n"
+        "- **REST API**: `/sessions/*` - Create and manage authentication sessions\n"
+        "- **MCP Endpoint**: `/mcp` - Agent tool access via Model Context Protocol"
+    ),
+    version="1.0.0",
+    lifespan=app_lifespan,
+)
+
+# Enable CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Mount MCP server at /mcp
+app.mount("/mcp", mcp.streamable_http_app())
+
+
+# ==============================================================================
+# REST API Endpoints (Session Management)
+# ==============================================================================
+
+@app.get("/health")
+async def health():
+    """Health check endpoint."""
+    return {
+        "status": "ok",
+        "service": "capital-planning-mcp",
+        "has_active_session": session_manager.has_active_session,
+    }
+
+
+@app.post(
+    "/sessions",
+    response_model=SessionResponse,
+    responses={400: {"model": ErrorResponse}},
+    summary="Create a new session",
+    description="Create an authenticated session from OIDC tokens. Call this BEFORE starting the agent.",
+    tags=["Sessions"],
+)
+async def create_session(request: CreateSessionRequest):
+    """Create a new authenticated session.
+    
+    The frontend calls this endpoint with tokens obtained from the OIDC server.
+    This keeps tokens out of the agent/LLM conversation entirely.
+    """
+    try:
+        session_id = await token_manager.create_session(
+            access_token=request.access_token,
+            refresh_token=request.refresh_token,
+            expires_in=request.expires_in,
+            refresh_expires_in=request.refresh_expires_in,
+            scopes=request.scopes,
+            user_id=request.user_id,
+        )
+        
+        return SessionResponse(
+            session_id=session_id,
+            user_id=request.user_id,
+            scopes=request.scopes,
+            message="Session created successfully. Call POST /sessions/{session_id}/activate to use it.",
+        )
+    except Exception as e:
+        logger.error(f"[REST API] Failed to create session: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post(
+    "/sessions/{session_id}/activate",
+    response_model=SessionResponse,
+    responses={404: {"model": ErrorResponse}},
+    summary="Activate a session for MCP tools",
+    description="Set the specified session as the active session. MCP tools will use this session.",
+    tags=["Sessions"],
+)
+async def activate_session(session_id: str):
+    """Activate a session for use by MCP tools.
+    
+    After creating a session, call this endpoint to make it the active
+    session. All subsequent MCP tool calls will use this session.
+    """
+    try:
+        session_manager.set_active_session(session_id)
+        session = token_manager.get_session(session_id)
+        
+        return SessionResponse(
+            session_id=session_id,
+            user_id=session.user_id,
+            scopes=session.scopes,
+            message="Session activated. MCP tools will now use this session.",
+        )
+    except AuthenticationError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"[REST API] Failed to activate session: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get(
+    "/sessions/{session_id}",
+    response_model=SessionInfoResponse,
+    responses={404: {"model": ErrorResponse}},
+    summary="Get session information",
+    description="Get detailed information about a session including token expiry times.",
+    tags=["Sessions"],
+)
+async def get_session_info(session_id: str):
+    """Get information about a session."""
+    stats = token_manager.get_session_stats(session_id)
+    
+    if "error" in stats:
+        raise HTTPException(status_code=404, detail=stats["error"])
+    
+    return SessionInfoResponse(
+        session_id=stats["session_id"],
+        user_id=stats["user_id"],
+        scopes=stats["scopes"],
+        access_token_expires_in_seconds=stats["access_token_expires_in_seconds"],
+        refresh_token_expires_in_seconds=stats["refresh_token_expires_in_seconds"],
+        refresh_count=stats["refresh_count"],
+        created_at=stats["created_at"],
+        last_refreshed_at=stats["last_refreshed_at"],
+    )
+
+
+@app.delete(
+    "/sessions/{session_id}",
+    summary="Delete a session",
+    description="Delete a session and clear it if it was active.",
+    tags=["Sessions"],
+)
+async def delete_session(session_id: str):
+    """Delete a session (logout)."""
+    # Clear if this was the active session
+    try:
+        if session_manager.has_active_session and session_manager.get_active_session() == session_id:
+            session_manager.clear_active_session()
+    except AuthenticationError:
+        pass
+    
+    deleted = token_manager.delete_session(session_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Session not found")
+    
+    return {"message": "Session deleted"}
+
+
+@app.get(
+    "/sessions/active/info",
+    response_model=SessionInfoResponse,
+    responses={404: {"model": ErrorResponse}},
+    summary="Get active session information",
+    description="Get information about the currently active session.",
+    tags=["Sessions"],
+)
+async def get_active_session_info():
+    """Get information about the active session."""
+    try:
+        session_id = session_manager.get_active_session()
+        stats = token_manager.get_session_stats(session_id)
+        
+        return SessionInfoResponse(
+            session_id=stats["session_id"],
+            user_id=stats["user_id"],
+            scopes=stats["scopes"],
+            access_token_expires_in_seconds=stats["access_token_expires_in_seconds"],
+            refresh_token_expires_in_seconds=stats["refresh_token_expires_in_seconds"],
+            refresh_count=stats["refresh_count"],
+            created_at=stats["created_at"],
+            last_refreshed_at=stats["last_refreshed_at"],
+        )
+    except AuthenticationError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+# ==============================================================================
+# Entry Point
 # ==============================================================================
 
 def main():
-    """Run the MCP server."""
-    # import argparse
+    """Run the server with uvicorn."""
+    import argparse
+    import uvicorn
     
-    # parser = argparse.ArgumentParser(description="Capital Planning MCP Server")
-    # parser.add_argument(
-    #     "--transport",
-    #     choices=["stdio", "streamable-http"],
-    #     default="stdio",
-    #     help="Transport mechanism (default: stdio)"
-    # )
-    # parser.add_argument(
-    #     "--port",
-    #     type=int,
-    #     default=8002,
-    #     help="Port for HTTP transport (default: 8002)"
-    # )
+    parser = argparse.ArgumentParser(description="Capital Planning MCP Server")
+    parser.add_argument(
+        "--host",
+        type=str,
+        default="0.0.0.0",
+        help="Host to bind to (default: 0.0.0.0)"
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=8002,
+        help="Port to bind to (default: 8002)"
+    )
+    parser.add_argument(
+        "--reload",
+        action="store_true",
+        help="Enable auto-reload for development"
+    )
     
-    # args = parser.parse_args()
+    args = parser.parse_args()
     
-    # if args.transport == "streamable-http":
-    logger.info(f"[MCP Server] Starting with streamable HTTP on port 8002")
-    mcp.run(transport="streamable-http")
-    # else:
-    #     logger.info("[MCP Server] Starting with stdio transport")
-    #     mcp.run()
+    logger.info(f"[Server] Starting on {args.host}:{args.port}")
+    logger.info(f"[Server] REST API: http://{args.host}:{args.port}/sessions")
+    logger.info(f"[Server] MCP Endpoint: http://{args.host}:{args.port}/mcp")
+    logger.info(f"[Server] API Docs: http://{args.host}:{args.port}/docs")
+    
+    uvicorn.run(
+        "mcp_server.main:app",
+        host=args.host,
+        port=args.port,
+        reload=args.reload,
+    )
 
 
 if __name__ == "__main__":

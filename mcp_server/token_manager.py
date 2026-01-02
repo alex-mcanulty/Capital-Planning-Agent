@@ -24,6 +24,11 @@ from .models import TokenSession
 logger = logging.getLogger(__name__)
 
 
+def utc_now() -> datetime:
+    """Get current UTC time with timezone info."""
+    return datetime.now(timezone.utc)
+
+
 class AuthenticationError(Exception):
     """Raised when authentication fails or tokens cannot be refreshed."""
     pass
@@ -90,7 +95,7 @@ class TokenManager:
             Session ID that can be used for subsequent API calls
         """
         session_id = secrets.token_urlsafe(32)
-        now = datetime.now(timezone.utc)
+        now = utc_now()
 
         session = TokenSession(
             session_id=session_id,
@@ -153,7 +158,7 @@ class TokenManager:
         if not session:
             raise AuthenticationError(f"Session not found: {session_id[:8]}...")
 
-        now = datetime.now(timezone.utc)
+        now = utc_now()
         buffer = timedelta(seconds=TOKEN_REFRESH_BUFFER_SECONDS)
 
         # Check if access token is still valid (with buffer)
@@ -228,7 +233,7 @@ class TokenManager:
                 )
 
             token_data = response.json()
-            now = datetime.now(timezone.utc)
+            now = utc_now()
 
             # Update session with new tokens (ROTATION - both tokens are new!)
             session.access_token = token_data["access_token"]
@@ -309,7 +314,7 @@ class TokenManager:
         if not session:
             return {"error": "Session not found"}
 
-        now = datetime.now(timezone.utc)
+        now = utc_now()
         return {
             "session_id": session.session_id[:8] + "...",
             "user_id": session.user_id,
