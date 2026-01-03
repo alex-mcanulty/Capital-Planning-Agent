@@ -14,8 +14,6 @@ const loginPage = document.getElementById('login-page');
 const dashboardPage = document.getElementById('dashboard-page');
 const loginForm = document.getElementById('login-form');
 const loginError = document.getElementById('login-error');
-const loadingIndicator = document.getElementById('loading');
-const responseOutput = document.getElementById('response-output');
 const activityLog = document.getElementById('activity-log');
 
 // Initialize
@@ -99,43 +97,9 @@ async function fetchUserInfo() {
     userInfo = await response.json();
 }
 
-async function refreshAccessToken() {
-    try {
-        log('Attempting to refresh access token...', 'info');
-
-        const response = await fetch(`${OIDC_SERVER}/token`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/x-www-form-urlencoded',
-            },
-            body: new URLSearchParams({
-                grant_type: 'refresh_token',
-                refresh_token: refreshToken,
-                client_id: CLIENT_ID
-            })
-        });
-
-        if (!response.ok) {
-            throw new Error('Token refresh failed');
-        }
-
-        const tokenData = await response.json();
-
-        // Update tokens (note: refresh token is rotated!)
-        accessToken = tokenData.access_token;
-        refreshToken = tokenData.refresh_token;
-        tokenExpiry = Date.now() + (tokenData.expires_in * 1000);
-
-        log('Access token refreshed successfully (refresh token rotated)', 'success');
-        updateTokenDisplay();
-
-        return true;
-    } catch (error) {
-        log(`Token refresh failed: ${error.message}`, 'error');
-        logout();
-        return false;
-    }
-}
+// Token refresh is now handled by the MCP server's global heartbeat
+// Frontend tokens are only used to establish the initial MCP session
+// which is created when the user sends their first chat message
 
 function showDashboard() {
     loginPage.classList.remove('active');
@@ -194,7 +158,6 @@ async function logout() {
     dashboardPage.classList.remove('active');
     loginPage.classList.add('active');
 
-    responseOutput.textContent = '';
     activityLog.innerHTML = '';
 }
 
@@ -230,116 +193,8 @@ function log(message, type = 'info') {
     }
 }
 
-function showLoading() {
-    loadingIndicator.classList.add('show');
-    responseOutput.textContent = '';
-}
-
-function hideLoading() {
-    loadingIndicator.classList.remove('show');
-}
-
-async function makeAuthenticatedRequest(method, endpoint, body = null) {
-    try {
-        showLoading();
-
-        // Check if token is about to expire (within 2 seconds)
-        const timeUntilExpiry = tokenExpiry - Date.now();
-        if (timeUntilExpiry < 2000) {
-            log('Access token expired or expiring soon, refreshing...', 'info');
-            const refreshed = await refreshAccessToken();
-            if (!refreshed) {
-                throw new Error('Failed to refresh token');
-            }
-        }
-
-        log(`${method} ${endpoint}`, 'info');
-        const startTime = Date.now();
-
-        const options = {
-            method: method,
-            headers: {
-                'Authorization': `Bearer ${accessToken}`,
-                'Content-Type': 'application/json'
-            }
-        };
-
-        if (body) {
-            options.body = JSON.stringify(body);
-        }
-
-        const response = await fetch(`${API_SERVER}${endpoint}`, options);
-        const duration = ((Date.now() - startTime) / 1000).toFixed(2);
-
-        const data = await response.json();
-
-        if (!response.ok) {
-            log(`Request failed (${response.status}): ${data.detail || 'Unknown error'}`, 'error');
-            responseOutput.textContent = JSON.stringify(data, null, 2);
-        } else {
-            log(`Request succeeded in ${duration}s`, 'success');
-            responseOutput.textContent = JSON.stringify(data, null, 2);
-        }
-
-        hideLoading();
-        return data;
-
-    } catch (error) {
-        log(`Request error: ${error.message}`, 'error');
-        responseOutput.textContent = `Error: ${error.message}`;
-        hideLoading();
-    }
-}
-
-async function testEndpoint(method, endpoint) {
-    await makeAuthenticatedRequest(method, endpoint);
-}
-
-async function testRiskAnalysis() {
-    const requestBody = {
-        asset_ids: ["asset-001", "asset-002", "asset-003", "asset-004", "asset-005"],
-        horizon_months: 12
-    };
-
-    log('Testing risk analysis (will take 5+ seconds)...', 'info');
-    await makeAuthenticatedRequest('POST', '/risk/analyze', requestBody);
-}
-
-async function testInvestmentOptimization() {
-    const requestBody = {
-        candidates: [
-            {
-                asset_id: "asset-001",
-                intervention_type: "replacement",
-                cost: 450000,
-                expected_risk_reduction: 0.85
-            },
-            {
-                asset_id: "asset-002",
-                intervention_type: "rehabilitation",
-                cost: 200000,
-                expected_risk_reduction: 0.60
-            },
-            {
-                asset_id: "asset-003",
-                intervention_type: "replacement",
-                cost: 500000,
-                expected_risk_reduction: 0.90
-            }
-        ],
-        budget: 1000000,
-        horizon_months: 12
-    };
-
-    log('Testing investment optimization (will take 8+ seconds)...', 'info');
-    await makeAuthenticatedRequest('POST', '/investments/optimize', requestBody);
-}
-
 function checkExistingSession() {
     // Could implement session persistence here
 }
 
-// Expose refresh function to UI
-window.refreshToken = async function() {
-    await refreshAccessToken();
-};
+// Manual token refresh removed - MCP server's global heartbeat handles token lifecycle

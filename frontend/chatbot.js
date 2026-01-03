@@ -1,6 +1,7 @@
 // Chatbot functionality for Capital Planning AI Assistant
 const AGENT_SERVER = 'http://localhost:8003';
 const MCP_SERVER = 'http://localhost:8002';
+const REFRESH_TOKEN_LIFETIME = 30; // seconds - must match OIDC server config
 
 // Chatbot state (use window scope for logout access)
 window.chatHistory = [];
@@ -37,11 +38,11 @@ async function ensureMCPSession() {
 
     try {
         // Prepare session data
+        // Note: MCP server refreshes all tokens every 25s via global heartbeat
+        // so we don't need to track or calculate expiration times
         const sessionData = {
             access_token: accessToken,
             refresh_token: refreshToken,
-            expires_in: Math.max(1, Math.round((tokenExpiry - Date.now()) / 1000)),
-            refresh_expires_in: 3600,
             scopes: userInfo.scopes,
             user_id: userInfo.sub
         };

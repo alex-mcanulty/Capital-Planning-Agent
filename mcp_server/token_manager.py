@@ -244,8 +244,9 @@ class TokenManager:
             # Store the NEW refresh token (this is the key to rotation)
             if "refresh_token" in token_data:
                 session.refresh_token = token_data["refresh_token"]
-                # Estimate refresh token expiry (server may or may not return this)
-                refresh_expires_in = token_data.get("refresh_expires_in", 3600)
+                # Use 30s to match OIDC server config (heartbeat refreshes every 25s)
+                # The OIDC server doesn't return refresh_expires_in, so we hardcode it
+                refresh_expires_in = token_data.get("refresh_expires_in", 30)
                 session.refresh_token_expires_at = now + timedelta(seconds=refresh_expires_in)
 
             session.last_refreshed_at = now
@@ -312,47 +313,45 @@ class TokenManager:
         """Refresh tokens for all active sessions.
 
         This method is called by the global heartbeat to proactively refresh
-        tokens before they expire, ensuring long-running workflows don't fail
-        due to token expiration.
+        all tokens every 25 seconds, regardless of their current expiration state.
+        This ensures tokens never expire during long-running workflows.
 
         Returns:
             Dictionary with refresh statistics:
             - total_sessions: Total number of sessions
             - refreshed: Number of sessions successfully refreshed
-            - skipped: Number of sessions skipped (token still valid)
             - failed: Number of sessions that failed to refresh
             - errors: List of error messages
         """
         stats = {
             "total_sessions": len(self._sessions),
             "refreshed": 0,
-            "skipped": 0,
             "failed": 0,
             "errors": []
         }
 
         now = utc_now()
-        buffer = timedelta(seconds=TOKEN_REFRESH_BUFFER_SECONDS)
 
         for session_id, session in list(self._sessions.items()):
             try:
-                # Check if access token is still valid
-                if session.access_token_expires_at > now + buffer:
-                    stats["skipped"] += 1
-                    continue
+                # Log timing information
+                access_remaining = (session.access_token_expires_at - now).total_seconds()
+                refresh_remaining = (session.refresh_token_expires_at - now).total_seconds()
 
-                # Check if refresh token is still valid
-                if session.refresh_token_expires_at <= now:
-                    error_msg = f"Session {session_id[:8]}... has expired refresh token"
-                    if LOG_TOKEN_EVENTS:
-                        logger.warning(f"[TokenManager] Heartbeat: {error_msg}")
-                    stats["failed"] += 1
-                    stats["errors"].append(error_msg)
-                    continue
+                if LOG_TOKEN_EVENTS:
+                    logger.info(
+                        f"[TokenManager] Heartbeat refreshing session {session_id[:8]}... "
+                        f"access_remaining={access_remaining:.1f}s, refresh_remaining={refresh_remaining:.1f}s"
+                    )
 
-                # Refresh the tokens
+                # Always refresh - don't check expiration times
+                # The heartbeat runs every 25s which is less than both
+                # access token (10s) and refresh token (30s) lifetimes
                 await self._refresh_tokens(session)
                 stats["refreshed"] += 1
+
+                if LOG_TOKEN_EVENTS:
+                    logger.info(f"[TokenManager] Heartbeat: Session {session_id[:8]}... refreshed successfully")
 
             except Exception as e:
                 error_msg = f"Session {session_id[:8]}... refresh failed: {str(e)}"

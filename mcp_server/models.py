@@ -130,12 +130,8 @@ class CreateSessionRequest(BaseModel):
 
     access_token: str = Field(..., description="Access token from OIDC server")
     refresh_token: str = Field(..., description="Refresh token from OIDC server")
-    expires_in: int = Field(..., description="Access token lifetime in seconds", ge=1)
-    refresh_expires_in: int = Field(
-        default=3600,
-        description="Refresh token lifetime in seconds",
-        ge=1
-    )
+    expires_in: Optional[int] = Field(None, description="Access token lifetime in seconds (optional, heartbeat handles refresh)", ge=1)
+    refresh_expires_in: Optional[int] = Field(None, description="Refresh token lifetime in seconds (optional, heartbeat handles refresh)", ge=1)
     scopes: list[str] = Field(default_factory=list, description="List of granted scopes")
     user_id: str = Field(..., description="User identifier (sub claim)")
 

@@ -320,7 +320,6 @@ async def token_refresh_heartbeat():
                         f"[Heartbeat] Refresh cycle complete: "
                         f"total={stats['total_sessions']}, "
                         f"refreshed={stats['refreshed']}, "
-                        f"skipped={stats['skipped']}, "
                         f"failed={stats['failed']}"
                     )
 
@@ -439,8 +438,8 @@ async def create_session(request: CreateSessionRequest):
         session_id = await token_manager.create_session(
             access_token=request.access_token,
             refresh_token=request.refresh_token,
-            expires_in=request.expires_in,
-            refresh_expires_in=request.refresh_expires_in,
+            expires_in=request.expires_in or 1,  # Default to 1s, heartbeat will refresh
+            refresh_expires_in=request.refresh_expires_in or 3600,  # Default to 1h
             scopes=request.scopes,
             user_id=request.user_id,
         )

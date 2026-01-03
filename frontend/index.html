@@ -75,35 +75,6 @@
                         <span id="has-refresh-token"></span>
                     </div>
                 </div>
-                <button onclick="refreshToken()" class="btn btn-secondary">Manual Refresh Token</button>
-            </div>
-
-            <div class="api-testing">
-                <h2>API Endpoint Testing</h2>
-
-                <div class="endpoint-group">
-                    <h3>Asset Service (requires: assets:read)</h3>
-                    <button onclick="testEndpoint('GET', '/assets')" class="btn btn-test">GET /assets</button>
-                    <button onclick="testEndpoint('GET', '/assets/asset-001')" class="btn btn-test">GET /assets/asset-001</button>
-                </div>
-
-                <div class="endpoint-group">
-                    <h3>Risk Service (requires: risk:analyze)</h3>
-                    <button onclick="testRiskAnalysis()" class="btn btn-test">POST /risk/analyze</button>
-                    <div class="note">Note: This takes 5 seconds (exceeds access token lifetime!)</div>
-                </div>
-
-                <div class="endpoint-group">
-                    <h3>Investment Service (requires: investments:write)</h3>
-                    <button onclick="testInvestmentOptimization()" class="btn btn-test">POST /investments/optimize</button>
-                    <div class="note">Note: This takes 8 seconds (exceeds access token lifetime!)</div>
-                </div>
-            </div>
-
-            <div class="response-section">
-                <h2>Response</h2>
-                <div id="loading" class="loading">Loading...</div>
-                <pre id="response-output"></pre>
             </div>
 
             <div class="log-section">
