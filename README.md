@@ -6,7 +6,8 @@ A production-ready demonstration of an autonomous AI agent for capital planning 
 
 This system demonstrates how to build an agentic AI application that:
 - Autonomously orchestrates multi-step capital planning workflows through natural language interaction
-- Handles authentication with intentionally short-lived tokens from a local OIDC auth server (simulating token expiration in production)
+- Handles authentication with intentionally short-lived tokens from a local OIDC auth server 
+- Simulates access token *and* refresh token expiration mid-workflow
 - Manages token lifecycle transparently during operations that exceed token lifetimes
 - Enforces scope-based authorization at the tool level (agents have the same access as the user who launches them)
 - Provides complete intervention recommendations to prevent hallucination
@@ -85,7 +86,60 @@ Navigate to: http://localhost:8080
 - Scopes: `assets:read`
 - Can only view assets, cannot analyze risk or optimize investments
 
-## Novel Architecture: Stateful MCP Server with REST API
+## Authentication Flow
+
+Authentication is handled **per-user** with isolated sessions. The MCP server acts as a token proxy - it never has its own service credentials, but manages each user's tokens independently.
+
+### Step-by-Step Flow
+
+```
+1. LOGIN
+   Browser → OIDC Server (8000)
+   └── POST /authorize + POST /token
+   └── Returns: access_token, refresh_token, user_id, scopes
+
+2. SESSION CREATION
+   Browser → MCP Server (8002)
+   └── POST /sessions { access_token, refresh_token, user_id, scopes }
+   └── Returns: session_id
+   └── POST /sessions/{session_id}/activate
+
+3. CHAT REQUEST
+   Browser → Agent Service (8003)
+   └── POST /chat { message, session_id }
+
+4. TOOL EXECUTION
+   Agent → MCP Server (8002)
+   └── MCP tool call (e.g., capital_get_assets)
+   └── MCP Server looks up active session_id
+   └── TokenManager retrieves user's access_token
+
+5. API CALL
+   MCP Server → Services API (8001)
+   └── GET /assets with Authorization: Bearer {user's access_token}
+   └── Services validates JWT via OIDC's JWKS endpoint
+   └── Returns data (if user has required scopes)
+```
+
+### Key Security Properties
+
+| Property | Implementation |
+|----------|---------------|
+| **Per-User Isolation** | Each user gets their own `session_id` with isolated tokens |
+| **Token Storage** | Tokens stored in MCP server's `TokenManager`, never in agent/LLM context |
+| **Token Validation** | Services API validates JWTs using OIDC's public key (RS256 + JWKS) |
+| **Scope Enforcement** | Two-level: MCP checks scopes before API call, Services validates JWT claims |
+| **Token Refresh** | Automatic via 25-second heartbeat + per-request checks |
+
+### Token Lifecycle
+
+- **Access Token**: 10 seconds (intentionally short to demonstrate refresh)
+- **Refresh Token**: 30 seconds (with rotation - each refresh gets new refresh token)
+- **Heartbeat**: Every 25 seconds, proactively refreshes all active sessions
+
+This design ensures tokens stay fresh even during long-running operations (e.g., 8-second optimization calls).
+
+## Architecture: Stateful MCP Server
 
 This project implements a **hybrid MCP server architecture** that solves a critical challenge: how to manage OAuth token lifecycle for long-running autonomous agent workflows.
 
@@ -96,7 +150,7 @@ Standard MCP servers are stateless - they receive a request, process it, and ret
 - Make multiple tool calls in sequence
 - Need to handle tokens that expire mid-workflow 
 
-### Our Solution: Hybrid MCP + REST Architecture
+### My Solution: Hybrid MCP + REST Architecture
 
 ```
 ┌────────────────────────────────────────────────────────────────────────┐
@@ -171,70 +225,14 @@ Standard MCP servers are stateless - they receive a request, process it, and ret
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
-### Key Architectural Decisions
+### Why Hybrid REST + MCP?
 
-#### 1. Hybrid REST + MCP Design
-
-**Why not use MCP protocol for authentication?**
-- MCP tools receive all parameters from the LLM, exposing tokens in conversation logs
-- Token refresh requires securely stored refresh tokens that shouldn't be in tool parameters
+**Problem:** MCP tools receive parameters from the LLM, which would expose tokens in conversation logs.
 
 **Solution:**
 - **REST API** (`/sessions/*`) for session management - tokens never touch the agent
 - **MCP Endpoint** (`/mcp/streamable`) for tool access - uses active session transparently
 - Frontend creates session with tokens, then agent uses tools without seeing credentials
-
-#### 2. Stateful Token Management
-
-**Challenge:** Operations take longer than access token lifetime (10s)
-
-**Solution: TokenManager class**
-```python
-# Before EVERY API call:
-1. Check if access token is still valid (with 2s buffer)
-2. If expired/expiring, use refresh token to get new access token
-3. Store new access token AND new refresh token (rotation)
-4. Make API call with fresh token
-```
-
-This enables workflows lasting hours without user re-authentication.
-
-#### 3. Global Token Refresh Heartbeat
-
-**Challenge:** A single tool call may take longer than the refresh token lifetime (30s)
-
-For example:
-- Tool call starts at t=0
-- Access token refreshed at t=8 (expires at t=10)
-- Tool still running at t=38 (refresh token expired at t=30)
-- Cannot refresh anymore - workflow fails
-
-**Solution: Background Heartbeat Task**
-```python
-# Independently of tool calls:
-Every 25 seconds:
-  For each active session:
-    If access token is expiring soon:
-      Refresh it proactively
-      Get new refresh token (with fresh 30s lifetime)
-```
-
-Tokens stay fresh regardless of individual operation duration.
-
-Configuration: `TOKEN_REFRESH_HEARTBEAT_SECONDS = 25` (in `mcp_server/config.py`)
-
-#### 4. Intentionally Short Token Lifetimes
-
-**Why such short tokens?**
-- Access token: 10 seconds
-- Refresh token: 30 seconds
-
-This simulates production constraints where tokens expire quickly for security. It forces the system to demonstrate robust token lifecycle management.
-
-In production, you might have:
-- Access token: 15 minutes
-- Refresh token: 1 hour
-- Same heartbeat pattern keeps them fresh indefinitely
 
 ## Mock Services & Data Design
 
@@ -321,7 +319,7 @@ This demonstrates the token management system under realistic load.
 ### LangChain Agent with MCP Tools
 
 Located in `agent/`:
-- Uses LangChain's create_agent (creates a Langgraph agent) for agentic orchestration
+- Uses LangChain's create_agent (creates a Langgraph ReAct agent) for planning and orchestration
 - Connects to MCP server via HTTP transport
 - System prompt guides tool selection and workflow planning
 - Streams responses to frontend in real-time via SSE
@@ -346,38 +344,14 @@ See `agent/agent_instruction.py` for complete system prompt.
 
 ## Testing the System
 
-### 1. Basic Workflow
+### Basic Workflow
 
 1. Login as `admin_user`
 2. In chat, type: "Analyze the top 5 assets at risk of failure and propose an optimized investment plan with a budget of $2 million."
-3. Observe agent:
-   - Fetch assets
-   - Analyze risk
-   - Review intervention recommendations
-   - Select optimal interventions
-   - Generate investment plan
-4. Watch MCP server logs for token refresh events
+3. Observe agent fetch assets, analyze risk, and generate an investment plan
+4. Watch MCP server logs for token refresh events during long operations
 
-### 2. Token Refresh Under Load
-
-Monitor logs during the workflow:
-
-**MCP Server logs:**
-```
-[Heartbeat] Token refresh heartbeat started (interval: 25s)
-[Heartbeat] Refresh cycle complete: total=1, refreshed=1, skipped=0, failed=0
-[TokenManager] Tokens refreshed for session abc123... (refresh #1)
-[TokenManager] Tokens refreshed for session abc123... (refresh #2)
-```
-
-**Services logs:**
-```
-[Services] POST /risk/analyze - User: admin_user
-[Services] Simulating analysis delay of 5s...
-[Services] Risk analysis complete: risk-analysis-xyz
-```
-
-### 3. Authorization Testing
+### Authorization Testing
 
 1. Login as `limited_user`
 2. Try: "Analyze the top 5 assets at risk"
@@ -385,15 +359,6 @@ Monitor logs during the workflow:
    ```
    Authorization Error: Access denied: User lacks required scope(s): ['risk:analyze']
    ```
-
-### 4. Long-Running Operations
-
-The system handles operations longer than both token lifetimes:
-- Access token: 10s
-- Refresh token: 30s
-- Risk analysis (5s) + Optimization (8s) = 13s total
-- Heartbeat refreshes tokens every 25s
-- Workflow completes successfully
 
 ## Project Structure
 
@@ -467,42 +432,12 @@ ENDPOINT_DELAYS = {
 
 ## Key Features Demonstrated
 
-### 1. Autonomous Agent Workflows
-- Natural language task decomposition
-- Multi-step planning and execution
-- Strategic decision-making with provided data
-
-### 2. Stateful MCP Server
-- Session management via REST API
-- Tool access via MCP protocol
-- Transparent token lifecycle management
-
-### 3. Token Refresh Strategies
-- Per-request refresh: Check before each API call
-- Global heartbeat: Proactive refresh for all sessions
-- Handles operations longer than both token lifetimes
-
-### 4. Authorization in Code
-- Scope enforcement at tool level
-- Agent cannot bypass user permissions
-- Clear error messages for missing scopes
-
-### 5. No Hallucination Design
-- Complete intervention recommendations from backend
-- Agent selects and reasons from among provided options
-- No estimation or invention of costs/risk reductions
-
-### 6. Long-Running Workflow Support
-- Operations exceeding HTTP request lifetimes
-- Multi-step workflows spanning minutes
-- Transparent to both user and agent
-
-### 7. Production-Ready Patterns
-- OAuth 2.0 authorization code flow
-- Refresh token rotation
-- JWT with RS256 signing
-- JWKS for key distribution
-- Scope-based authorization
+- **Autonomous Agent Workflows**: Natural language task decomposition, multi-step planning, strategic decision-making
+- **Hybrid MCP Architecture**: REST for session management, MCP for tools, tokens never exposed to agent
+- **Per-User Authentication**: Isolated sessions with automatic token refresh via background heartbeat
+- **Two-Level Authorization**: Scope enforcement at both MCP and Services API levels
+- **No Hallucination Design**: Agent selects from backend-provided intervention options, never estimates
+- **Production-Ready Patterns**: OAuth 2.0, refresh token rotation, RS256 JWTs, JWKS key distribution
 
 ## API Endpoints
 
@@ -544,23 +479,3 @@ Accessed via MCP protocol:
 
 - `POST /chat` - Chat with agent (returns SSE stream)
 - `POST /session` - Create MCP session with tokens
-
-## What's Next?
-
-This system is **complete and production-ready** as a demonstration of:
-- Agentic AI workflows with real authorization
-- Stateful MCP server architecture
-- Long-running autonomous operations
-- Token lifecycle management
-
-**Potential extensions:**
-- Multi-user support with session isolation
-- Persistent workflow state across sessions
-- Real-time collaboration features
-- Integration with actual asset management systems
-- Advanced optimization algorithms
-- Multi-day workflow support with workflow-specific grants
-
-## License
-
-This is a demonstration project. See LICENSE for details.

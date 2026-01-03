@@ -44,9 +44,9 @@ async def lifespan(app: FastAPI):
 
     # Initialize LLM
     llm = ChatOpenAI(
-        # model_name="gpt-5-mini-2025-08-07",
-        model_name="qwen3-next-80b-a3b-thinking",
-        base_url="http://127.0.0.1:1234/v1", 
+        model_name="gpt-5-mini-2025-08-07",
+        # model_name="qwen3-next-80b-a3b-thinking",
+        # base_url="http://127.0.0.1:1234/v1", 
         temperature=0
     )
 
