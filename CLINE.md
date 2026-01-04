@@ -26,9 +26,9 @@ Frontend (8080) → OIDC (8000) → tokens
 ```
 
 The MCP server is a **hybrid REST + MCP** design:
-- REST `/sessions/*` endpoints manage user tokens (called by frontend)
+- REST `/sessions/*` endpoints manage user tokens (called by agent, not frontend)
 - MCP `/mcp` endpoint exposes tools (called by agent)
-- Tokens never reach the agent/LLM
+- Tokens are passed from frontend → agent → MCP server (agent doesn't inspect them)
 
 ## Intentional Design Decisions (Don't "Fix" These)
 
@@ -50,12 +50,12 @@ ENDPOINT_DELAYS = {
 ```
 **Why:** These delays ensure tokens expire mid-request, forcing the heartbeat refresh to kick in. Don't remove these.
 
-### 3. 25-Second Heartbeat
+### 3. 8-Second Heartbeat (Sole Refresh Mechanism)
 ```python
 # mcp_server/config.py
-TOKEN_REFRESH_HEARTBEAT_SECONDS = 25  # Must be < 30s refresh token lifetime
+TOKEN_REFRESH_HEARTBEAT_SECONDS = 8  # Must be < 10s access token lifetime
 ```
-**Why:** Proactively refreshes all sessions before refresh tokens expire. This handles long-running tool calls where the token can't be refreshed mid-request.
+**Why:** The heartbeat is the ONLY place tokens are refreshed. This eliminates race conditions from concurrent refresh attempts. The 8s interval ensures access tokens (10s lifetime) are always refreshed with ~2s buffer. No on-demand refresh exists - if a token expires, it means the heartbeat isn't running fast enough.
 
 ### 4. Token Rotation Enabled
 ```python
@@ -82,6 +82,25 @@ USERS = {
 | `mcp_server/api_client.py` | Calls Services API with user's token |
 | `mcp_server/main.py` | Hybrid REST + MCP server, heartbeat task |
 | `services/auth.py` | JWT validation via OIDC's JWKS |
+| `agent/main.py` | Creates/deletes MCP sessions per invocation |
 | `agent/agent_instruction.py` | System prompt for the LangChain agent |
-| `frontend/chatbot.js` | Creates MCP session, activates it, sends chat |
+| `frontend/chatbot.js` | Passes OIDC tokens with each chat request |
 
+## Session Flow (Agent-Scoped Sessions)
+
+```
+1. Frontend: User logs in via OIDC → gets access_token + refresh_token
+2. Frontend: POST /chat/stream to Agent with { message, tokens, scopes, user_id, history }
+3. Agent: POST /sessions to MCP server → creates session, gets session_id
+4. Agent: Creates MCP client with X-Session-ID header set to session_id
+5. Agent: Invokes LangGraph agent, which calls MCP tools
+6. MCP Server: Tools read X-Session-ID header → look up session → use that user's tokens
+7. MCP Server: Makes authenticated API calls to Services
+8. Agent: DELETE /sessions/{session_id} when agent completes (success or error)
+9. Agent: Returns streaming response to frontend
+```
+
+**Key point:** MCP sessions are scoped to agent invocations, not browser sessions.
+Each chat request creates a new session, uses it for the duration of the agent run,
+then deletes it. This eliminates stale session issues and simplifies the design.
+Multiple concurrent requests (even from different browser tabs) each get their own session.

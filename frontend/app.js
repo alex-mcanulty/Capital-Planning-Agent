@@ -97,9 +97,9 @@ async function fetchUserInfo() {
     userInfo = await response.json();
 }
 
-// Token refresh is now handled by the MCP server's global heartbeat
-// Frontend tokens are only used to establish the initial MCP session
-// which is created when the user sends their first chat message
+// Token refresh is handled by the MCP server's global heartbeat during agent invocations
+// OIDC tokens are passed with each chat request to the agent
+// The agent creates/deletes MCP sessions per invocation (not per browser session)
 
 function showDashboard() {
     loginPage.classList.remove('active');
@@ -128,19 +128,6 @@ function startTokenExpiryMonitor() {
 }
 
 async function logout() {
-    // Delete MCP session if one exists
-    if (window.mcpSessionId) {
-        try {
-            await fetch(`http://localhost:8002/sessions/${window.mcpSessionId}`, {
-                method: 'DELETE'
-            });
-            console.log('[App] MCP session deleted');
-        } catch (error) {
-            console.error('[App] Failed to delete MCP session:', error);
-        }
-        window.mcpSessionId = null;
-    }
-
     // Clear chatbot state
     if (window.chatHistory) {
         window.chatHistory = [];
@@ -150,6 +137,7 @@ async function logout() {
         chatbotMessages.innerHTML = '';
     }
 
+    // Clear OIDC tokens
     accessToken = null;
     refreshToken = null;
     tokenExpiry = null;
@@ -158,7 +146,8 @@ async function logout() {
     dashboardPage.classList.remove('active');
     loginPage.classList.add('active');
 
-    activityLog.innerHTML = '';
+    // Note: No need to delete MCP sessions here - they are created and deleted
+    // per agent invocation, not per browser session
 }
 
 function showError(message) {

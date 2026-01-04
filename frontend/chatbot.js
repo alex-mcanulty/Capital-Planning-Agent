@@ -1,13 +1,10 @@
 // Chatbot functionality for Capital Planning AI Assistant
 const AGENT_SERVER = 'http://localhost:8003';
-const MCP_SERVER = 'http://localhost:8002';
-const REFRESH_TOKEN_LIFETIME = 30; // seconds - must match OIDC server config
 
 // Chatbot state (use window scope for logout access)
 window.chatHistory = [];
 let chatHistory = window.chatHistory;
 let isStreaming = false;
-window.mcpSessionId = null;
 
 // DOM elements
 const chatbotMessages = document.getElementById('chatbot-messages');
@@ -29,67 +26,6 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 /**
- * Ensure MCP session is created and activated
- */
-async function ensureMCPSession() {
-    if (window.mcpSessionId) {
-        return window.mcpSessionId;
-    }
-
-    try {
-        // Prepare session data
-        // Note: MCP server refreshes all tokens every 25s via global heartbeat
-        // so we don't need to track or calculate expiration times
-        const sessionData = {
-            access_token: accessToken,
-            refresh_token: refreshToken,
-            scopes: userInfo.scopes,
-            user_id: userInfo.sub
-        };
-
-        console.log('[Chatbot] Creating MCP session with data:', {
-            ...sessionData,
-            access_token: '***',
-            refresh_token: '***'
-        });
-
-        // Create session with OIDC tokens
-        const createResponse = await fetch(`${MCP_SERVER}/sessions`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify(sessionData)
-        });
-
-        if (!createResponse.ok) {
-            const errorText = await createResponse.text();
-            console.error('[Chatbot] Failed to create MCP session:', createResponse.status, errorText);
-            throw new Error(`Failed to create MCP session: ${createResponse.status} - ${errorText}`);
-        }
-
-        const createData = await createResponse.json();
-        window.mcpSessionId = createData.session_id;
-
-        // Activate session
-        const activateResponse = await fetch(`${MCP_SERVER}/sessions/${window.mcpSessionId}/activate`, {
-            method: 'POST',
-        });
-
-        if (!activateResponse.ok) {
-            throw new Error(`Failed to activate MCP session: ${activateResponse.status}`);
-        }
-
-        console.log('[Chatbot] MCP session created and activated:', window.mcpSessionId);
-        return window.mcpSessionId;
-
-    } catch (error) {
-        console.error('[Chatbot] Failed to setup MCP session:', error);
-        throw error;
-    }
-}
-
-/**
  * Send a message to the agent
  */
 async function sendMessage() {
@@ -109,13 +45,10 @@ async function sendMessage() {
     chatbotSend.disabled = true;
 
     try {
-        // Ensure MCP session is active before calling agent
-        await ensureMCPSession();
-
         // Create assistant message placeholder
         const assistantMessageId = addMessage('assistant', '', true);
 
-        // Stream response from agent
+        // Stream response from agent (pass OIDC tokens with each request)
         await streamAgentResponse(message, assistantMessageId);
 
     } catch (error) {
@@ -172,6 +105,9 @@ function addToolCallIndicator(toolName) {
 
 /**
  * Stream agent response using SSE
+ *
+ * OIDC tokens are passed with each request. The agent creates an MCP session
+ * at the start of each invocation and deletes it when done.
  */
 async function streamAgentResponse(message, assistantMessageId) {
     const response = await fetch(`${AGENT_SERVER}/chat/stream`, {
@@ -181,6 +117,10 @@ async function streamAgentResponse(message, assistantMessageId) {
         },
         body: JSON.stringify({
             message: message,
+            access_token: accessToken,
+            refresh_token: refreshToken,
+            scopes: userInfo.scopes,
+            user_id: userInfo.sub,
             history: chatHistory
         })
     });

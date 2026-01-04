@@ -16,8 +16,7 @@ from .main import (
     app,
     mcp,
     main,
-    session_manager,
-    SessionManager,
+    get_session_id_from_request,
 )
 from .token_manager import token_manager, TokenManager, AuthenticationError, AuthorizationError
 from .api_client import api_client, CapitalPlanningAPIClient, APIError
@@ -40,8 +39,7 @@ __all__ = [
     "mcp",
     "main",
     # Session management
-    "session_manager",
-    "SessionManager",
+    "get_session_id_from_request",
     # Token management
     "token_manager",
     "TokenManager",

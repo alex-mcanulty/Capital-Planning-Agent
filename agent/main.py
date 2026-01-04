@@ -2,6 +2,12 @@
 
 This service provides a chatbot interface that streams responses from the
 LangGraph agent using Server-Sent Events (SSE).
+
+Session Management:
+- Each chat request includes OIDC tokens from the frontend
+- Agent creates an MCP session at the start of each invocation
+- Agent deletes the MCP session when the invocation completes
+- This ensures sessions are scoped to agent invocations, not browser sessions
 """
 import os
 import asyncio
@@ -9,6 +15,7 @@ import logging
 from typing import AsyncGenerator
 from contextlib import asynccontextmanager
 
+import httpx
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
@@ -29,58 +36,134 @@ logger = logging.getLogger(__name__)
 os.environ["LANGSMITH_PROJECT"] = "Capital Planner Agent"
 os.environ["LANGSMITH_TRACING"] = "true"
 
-# Global variables for agent and MCP client
+# MCP Server configuration
+MCP_SERVER_URL = "http://localhost:8002/mcp/streamable"
+MCP_SESSION_URL = "http://localhost:8002/sessions"
+
+# Global LLM instance (shared across requests)
 llm = None
-mcp_client = None
-agent = None
+
+# HTTP client for MCP session management
+http_client: httpx.AsyncClient = None
 
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    """Initialize and cleanup resources."""
-    global llm, mcp_client, agent
+async def create_mcp_session(
+    access_token: str,
+    refresh_token: str,
+    scopes: list[str],
+    user_id: str
+) -> str:
+    """Create an MCP session with the provided OIDC tokens.
 
-    logger.info("[Agent] Starting Capital Planning Agent Service")
+    Args:
+        access_token: OIDC access token
+        refresh_token: OIDC refresh token
+        scopes: List of granted scopes
+        user_id: User identifier
 
-    # Initialize LLM
-    llm = ChatOpenAI(
-        model_name="gpt-5-mini-2025-08-07",
-        # model_name="qwen3-next-80b-a3b-thinking",
-        # base_url="http://127.0.0.1:1234/v1", 
-        temperature=0
+    Returns:
+        session_id: The created session ID
+    """
+    response = await http_client.post(
+        MCP_SESSION_URL,
+        json={
+            "access_token": access_token,
+            "refresh_token": refresh_token,
+            "scopes": scopes,
+            "user_id": user_id
+        }
     )
 
-    # Initialize MCP client
+    if response.status_code != 200:
+        raise HTTPException(
+            status_code=response.status_code,
+            detail=f"Failed to create MCP session: {response.text}"
+        )
+
+    data = response.json()
+    session_id = data["session_id"]
+    logger.info(f"[Agent] Created MCP session: {session_id[:16]}...")
+    return session_id
+
+
+async def delete_mcp_session(session_id: str):
+    """Delete an MCP session.
+
+    Args:
+        session_id: The session ID to delete
+    """
+    try:
+        response = await http_client.delete(f"{MCP_SESSION_URL}/{session_id}")
+        if response.status_code == 200:
+            logger.info(f"[Agent] Deleted MCP session: {session_id[:16]}...")
+        else:
+            logger.warning(
+                f"[Agent] Failed to delete MCP session {session_id[:16]}...: "
+                f"{response.status_code} - {response.text}"
+            )
+    except Exception as e:
+        logger.error(f"[Agent] Error deleting MCP session: {e}")
+
+
+async def create_agent_with_session(session_id: str):
+    """Create an agent with MCP tools configured for a specific session.
+
+    Each request gets its own MCP client with the session_id in headers.
+    This ensures per-user session isolation.
+    """
+    # Create MCP client with session-specific headers
     mcp_client = MultiServerMCPClient(
         {
             "capital_planner_tools": {
-                "transport": "http",
-                "url": "http://localhost:8002/mcp/streamable",
+                "transport": "streamable_http",
+                "url": MCP_SERVER_URL,
+                "headers": {
+                    "X-Session-ID": session_id,
+                }
             }
         }
     )
 
     # Get tools from MCP server
-    logger.info("[Agent] Connecting to MCP server and loading tools...")
     mcp_tools = await mcp_client.get_tools()
-    logger.info(f"[Agent] Loaded {len(mcp_tools)} tools from MCP server")
+    logger.info(f"[Agent] Loaded {len(mcp_tools)} tools for session {session_id[:16]}...")
 
-    # Create agent
+    # Create agent with these tools
     agent = create_agent(
         model=llm,
         tools=mcp_tools,
         system_prompt=capital_planner_instruction
     )
 
-    logger.info("[Agent] Agent initialized successfully")
+    return agent, mcp_client
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Initialize and cleanup resources."""
+    global llm, http_client
+
+    logger.info("[Agent] Starting Capital Planning Agent Service")
+
+    # Initialize HTTP client for MCP session management
+    http_client = httpx.AsyncClient(timeout=30.0)
+
+    # Initialize LLM (shared across all requests)
+    llm = ChatOpenAI(
+        model_name="gpt-5-mini-2025-08-07",
+        # model_name="qwen3-next-80b-a3b-thinking",
+        # base_url="http://127.0.0.1:1234/v1",
+        temperature=0
+    )
+
+    logger.info("[Agent] LLM initialized, ready to accept requests")
 
     yield
 
     # Cleanup
     logger.info("[Agent] Shutting down...")
-    if mcp_client:
-        # MCP client cleanup if needed
-        pass
+    if http_client:
+        await http_client.aclose()
 
 
 app = FastAPI(
@@ -112,6 +195,10 @@ class ChatMessage(BaseModel):
 class ChatRequest(BaseModel):
     """Request for chat endpoint."""
     message: str = Field(..., description="User's message")
+    access_token: str = Field(..., description="OIDC access token")
+    refresh_token: str = Field(..., description="OIDC refresh token")
+    scopes: list[str] = Field(..., description="Granted scopes")
+    user_id: str = Field(..., description="User identifier")
     history: list[ChatMessage] = Field(
         default_factory=list,
         description="Conversation history"
@@ -128,16 +215,32 @@ async def health():
     return {
         "status": "ok",
         "service": "capital-planning-agent",
-        "agent_ready": agent is not None
+        "llm_ready": llm is not None
     }
 
 
 @traceable()
 async def stream_agent_response(
     user_message: str,
+    access_token: str,
+    refresh_token: str,
+    scopes: list[str],
+    user_id: str,
     history: list[ChatMessage]
 ) -> AsyncGenerator[str, None]:
     """Stream agent responses as SSE events.
+
+    Session lifecycle:
+    - Creates an MCP session at the start of the agent invocation
+    - Deletes the MCP session when the agent completes (success or error)
+
+    Args:
+        user_message: The user's message
+        access_token: OIDC access token
+        refresh_token: OIDC refresh token
+        scopes: Granted scopes
+        user_id: User identifier
+        history: Conversation history
 
     Yields SSE-formatted messages with the following event types:
     - message_start: Indicates a new message is starting
@@ -146,7 +249,15 @@ async def stream_agent_response(
     - message_end: Indicates the message is complete
     - error: An error occurred
     """
+    session_id = None
     try:
+        # Create MCP session for this agent invocation
+        session_id = await create_mcp_session(access_token, refresh_token, scopes, user_id)
+
+        # Create agent with session-specific MCP client
+        logger.info(f"[Agent] Creating agent for session: {session_id[:16]}...")
+        agent, mcp_client = await create_agent_with_session(session_id)
+
         # Convert history to LangChain format
         lc_messages = [
             {"role": msg.role, "content": msg.content}
@@ -223,10 +334,19 @@ async def stream_agent_response(
         yield f"event: error\n"
         yield f"data: {str(e)}\n\n"
 
+    finally:
+        # Always clean up the MCP session
+        if session_id:
+            await delete_mcp_session(session_id)
+
 
 @app.post("/chat/stream")
 async def chat_stream(request: ChatRequest):
     """Stream chat responses using Server-Sent Events.
+
+    Session lifecycle:
+    - MCP session is created at the start of the agent invocation
+    - MCP session is deleted when the agent completes
 
     The response stream contains SSE events with the following types:
     - message_start: New message starting
@@ -235,14 +355,21 @@ async def chat_stream(request: ChatRequest):
     - message_end: Message complete
     - error: Error occurred
     """
-    if not agent:
+    if not llm:
         raise HTTPException(
             status_code=503,
-            detail="Agent not initialized. Please try again later."
+            detail="LLM not initialized. Please try again later."
         )
 
     return StreamingResponse(
-        stream_agent_response(request.message, request.history),
+        stream_agent_response(
+            request.message,
+            request.access_token,
+            request.refresh_token,
+            request.scopes,
+            request.user_id,
+            request.history
+        ),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
@@ -256,23 +383,40 @@ async def chat_stream(request: ChatRequest):
 async def chat(request: ChatRequest):
     """Non-streaming chat endpoint (for testing).
 
+    Session lifecycle:
+    - MCP session is created at the start of the agent invocation
+    - MCP session is deleted when the agent completes
+
     Returns the complete response after the agent finishes.
     """
-    if not agent:
+    if not llm:
         raise HTTPException(
             status_code=503,
-            detail="Agent not initialized. Please try again later."
+            detail="LLM not initialized. Please try again later."
         )
 
-    # Convert history to LangChain format
-    lc_messages = [
-        {"role": msg.role, "content": msg.content}
-        for msg in request.history
-    ]
-    lc_messages.append({"role": "user", "content": request.message})
-
-    # Get response
+    session_id = None
     try:
+        # Create MCP session for this agent invocation
+        session_id = await create_mcp_session(
+            request.access_token,
+            request.refresh_token,
+            request.scopes,
+            request.user_id
+        )
+
+        # Create agent with session-specific MCP client
+        logger.info(f"[Agent] Creating agent for session: {session_id[:16]}...")
+        agent, mcp_client = await create_agent_with_session(session_id)
+
+        # Convert history to LangChain format
+        lc_messages = [
+            {"role": msg.role, "content": msg.content}
+            for msg in request.history
+        ]
+        lc_messages.append({"role": "user", "content": request.message})
+
+        # Get response
         result = await agent.ainvoke({"messages": lc_messages})
 
         # Extract final message
@@ -285,6 +429,10 @@ async def chat(request: ChatRequest):
     except Exception as e:
         logger.error(f"[Agent] Error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        # Always clean up the MCP session
+        if session_id:
+            await delete_mcp_session(session_id)
 
 
 if __name__ == "__main__":

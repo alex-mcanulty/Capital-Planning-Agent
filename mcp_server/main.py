@@ -27,6 +27,7 @@ from typing import Optional
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from mcp.server.fastmcp import FastMCP
+from fastmcp.server.dependencies import get_http_headers
 
 from .config import TOOL_SCOPE_REQUIREMENTS, TOKEN_REFRESH_HEARTBEAT_SECONDS
 from .models import (
@@ -60,55 +61,34 @@ logger = logging.getLogger(__name__)
 
 
 # ==============================================================================
-# Session State Management
+# Session ID from Request Headers
 # ==============================================================================
 
-class SessionManager:
-    """Manages the active session for MCP tool calls.
-    
-    This is separate from TokenManager - it just tracks WHICH session
-    is currently active for the MCP server to use.
+def get_session_id_from_request() -> str:
+    """Get session ID from the X-Session-ID header.
+
+    The agent passes the session_id in the X-Session-ID header with each MCP request.
+    This allows multiple users/sessions to use the MCP server concurrently.
+
+    Raises:
+        AuthenticationError: If no session ID header is present or session doesn't exist
     """
-    
-    def __init__(self):
-        self._active_session_id: Optional[str] = None
-    
-    def set_active_session(self, session_id: str) -> None:
-        """Set the active session for MCP tools."""
-        # Verify session exists
-        session = token_manager.get_session(session_id)
-        if not session:
-            raise AuthenticationError(f"Session not found: {session_id[:16]}...")
-        
-        self._active_session_id = session_id
-        logger.info(f"[SessionManager] Active session set: {session_id[:16]}... (user: {session.user_id})")
-    
-    def get_active_session(self) -> str:
-        """Get the active session ID.
-        
-        Raises:
-            AuthenticationError: If no session is active
-        """
-        if not self._active_session_id:
-            raise AuthenticationError(
-                "No active session. The frontend must create and activate a session "
-                "via POST /sessions and POST /sessions/{id}/activate before using tools."
-            )
-        return self._active_session_id
-    
-    def clear_active_session(self) -> None:
-        """Clear the active session."""
-        self._active_session_id = None
-        logger.info("[SessionManager] Active session cleared")
-    
-    @property
-    def has_active_session(self) -> bool:
-        """Check if there's an active session."""
-        return self._active_session_id is not None
+    headers = get_http_headers()
+    session_id = headers.get("x-session-id")
 
+    if not session_id:
+        raise AuthenticationError(
+            "No X-Session-ID header provided. The agent must include the session_id "
+            "in the X-Session-ID header when calling MCP tools."
+        )
 
-# Global session manager
-session_manager = SessionManager()
+    # Verify session exists
+    session = token_manager.get_session(session_id)
+    if not session:
+        raise AuthenticationError(f"Session not found: {session_id[:16]}...")
+
+    logger.debug(f"[MCP] Using session from header: {session_id[:16]}... (user: {session.user_id})")
+    return session_id
 
 
 # ==============================================================================
@@ -154,7 +134,7 @@ async def capital_get_assets(params: GetAssetsInput) -> str:
     Returns:
         List of assets with id, name, type, condition, age, and cost information
     """
-    session_id = session_manager.get_active_session()
+    session_id = get_session_id_from_request()
     return await get_assets_tool(params, session_id)
 
 
@@ -184,7 +164,7 @@ async def capital_get_asset(params: GetAssetInput) -> str:
     Returns:
         Detailed asset information including condition and financial data
     """
-    session_id = session_manager.get_active_session()
+    session_id = get_session_id_from_request()
     return await get_asset_tool(params, session_id)
 
 
@@ -220,7 +200,7 @@ async def capital_analyze_risk(params: AnalyzeRiskInput) -> str:
         Risk analysis with probability of failure, consequence score, and overall
         risk score for each asset, sorted by risk (highest first)
     """
-    session_id = session_manager.get_active_session()
+    session_id = get_session_id_from_request()
     return await analyze_risk_tool(params, session_id)
 
 
@@ -261,7 +241,7 @@ async def capital_optimize_investments(params: OptimizeInvestmentsInput) -> str:
         Optimized investment plan with selected investments, budget usage,
         and total expected risk reduction
     """
-    session_id = session_manager.get_active_session()
+    session_id = get_session_id_from_request()
     return await optimize_investments_tool(params, session_id)
 
 
@@ -285,7 +265,7 @@ async def capital_session_info() -> str:
     Returns:
         Session information including token status and refresh count
     """
-    session_id = session_manager.get_active_session()
+    session_id = get_session_id_from_request()
     return await get_session_info_tool(session_id)
 
 
@@ -414,7 +394,7 @@ async def health():
     return {
         "status": "ok",
         "service": "capital-planning-mcp",
-        "has_active_session": session_manager.has_active_session,
+        "active_sessions": token_manager.session_count,
     }
 
 
@@ -448,42 +428,11 @@ async def create_session(request: CreateSessionRequest):
             session_id=session_id,
             user_id=request.user_id,
             scopes=request.scopes,
-            message="Session created successfully. Call POST /sessions/{session_id}/activate to use it.",
+            message="Session created successfully. Pass session_id in X-Session-ID header when calling MCP tools.",
         )
     except Exception as e:
         logger.error(f"[REST API] Failed to create session: {e}")
         raise HTTPException(status_code=400, detail=str(e))
-
-
-@app.post(
-    "/sessions/{session_id}/activate",
-    response_model=SessionResponse,
-    responses={404: {"model": ErrorResponse}},
-    summary="Activate a session for MCP tools",
-    description="Set the specified session as the active session. MCP tools will use this session.",
-    tags=["Sessions"],
-)
-async def activate_session(session_id: str):
-    """Activate a session for use by MCP tools.
-    
-    After creating a session, call this endpoint to make it the active
-    session. All subsequent MCP tool calls will use this session.
-    """
-    try:
-        session_manager.set_active_session(session_id)
-        session = token_manager.get_session(session_id)
-        
-        return SessionResponse(
-            session_id=session_id,
-            user_id=session.user_id,
-            scopes=session.scopes,
-            message="Session activated. MCP tools will now use this session.",
-        )
-    except AuthenticationError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-    except Exception as e:
-        logger.error(f"[REST API] Failed to activate session: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get(
@@ -516,51 +465,17 @@ async def get_session_info(session_id: str):
 @app.delete(
     "/sessions/{session_id}",
     summary="Delete a session",
-    description="Delete a session and clear it if it was active.",
+    description="Delete a session (logout).",
     tags=["Sessions"],
 )
 async def delete_session(session_id: str):
     """Delete a session (logout)."""
-    # Clear if this was the active session
-    try:
-        if session_manager.has_active_session and session_manager.get_active_session() == session_id:
-            session_manager.clear_active_session()
-    except AuthenticationError:
-        pass
-    
     deleted = token_manager.delete_session(session_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Session not found")
-    
+
+    logger.info(f"[REST API] Session deleted: {session_id[:16]}...")
     return {"message": "Session deleted"}
-
-
-@app.get(
-    "/sessions/active/info",
-    response_model=SessionInfoResponse,
-    responses={404: {"model": ErrorResponse}},
-    summary="Get active session information",
-    description="Get information about the currently active session.",
-    tags=["Sessions"],
-)
-async def get_active_session_info():
-    """Get information about the active session."""
-    try:
-        session_id = session_manager.get_active_session()
-        stats = token_manager.get_session_stats(session_id)
-        
-        return SessionInfoResponse(
-            session_id=stats["session_id"],
-            user_id=stats["user_id"],
-            scopes=stats["scopes"],
-            access_token_expires_in_seconds=stats["access_token_expires_in_seconds"],
-            refresh_token_expires_in_seconds=stats["refresh_token_expires_in_seconds"],
-            refresh_count=stats["refresh_count"],
-            created_at=stats["created_at"],
-            last_refreshed_at=stats["last_refreshed_at"],
-        )
-    except AuthenticationError as e:
-        raise HTTPException(status_code=404, detail=str(e))
 
 
 # ==============================================================================

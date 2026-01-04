@@ -2,6 +2,7 @@
 
 # MCP SDK
 mcp>=1.0.0
+fastmcp
 
 # HTTP client
 httpx>=0.27.0

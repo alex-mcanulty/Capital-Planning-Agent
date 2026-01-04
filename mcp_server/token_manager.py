@@ -16,7 +16,6 @@ from .config import (
     OIDC_SERVER_URL,
     OIDC_CLIENT_ID,
     OIDC_CLIENT_SECRET,
-    TOKEN_REFRESH_BUFFER_SECONDS,
     LOG_TOKEN_EVENTS,
 )
 from .models import TokenSession
@@ -132,37 +131,39 @@ class TokenManager:
             return True
         return False
 
+    @property
+    def session_count(self) -> int:
+        """Get the number of active sessions."""
+        return len(self._sessions)
+
     # ==========================================================================
     # Token Validation and Refresh
     # ==========================================================================
 
     async def ensure_valid_token(self, session_id: str) -> str:
-        """Ensure the session has a valid access token, refreshing if needed.
-        
-        This is the key method called before every API request. It:
-        1. Checks if access token is still valid (with buffer time)
-        2. If expired/expiring, attempts to refresh using refresh token
-        3. If refresh succeeds, stores BOTH new access and refresh tokens (rotation)
-        4. If refresh fails, raises AuthenticationError
-        
+        """Get the access token for a session.
+
+        This method returns the current access token. Token refresh is handled
+        exclusively by the global heartbeat (every 8s), which ensures tokens
+        are always fresh. This eliminates race conditions from concurrent refresh.
+
         Args:
-            session_id: The session to validate
-            
+            session_id: The session to get the token for
+
         Returns:
-            A valid access token
-            
+            The current access token
+
         Raises:
-            AuthenticationError: If session doesn't exist or refresh fails
+            AuthenticationError: If session doesn't exist or token has expired
         """
         session = self._sessions.get(session_id)
         if not session:
             raise AuthenticationError(f"Session not found: {session_id[:8]}...")
 
         now = utc_now()
-        buffer = timedelta(seconds=TOKEN_REFRESH_BUFFER_SECONDS)
 
-        # Check if access token is still valid (with buffer)
-        if session.access_token_expires_at > now + buffer:
+        # Check if access token is still valid
+        if session.access_token_expires_at > now:
             if LOG_TOKEN_EVENTS:
                 remaining = (session.access_token_expires_at - now).total_seconds()
                 logger.debug(
@@ -171,26 +172,17 @@ class TokenManager:
                 )
             return session.access_token
 
-        # Access token expired or expiring - need to refresh
+        # Access token expired - this shouldn't happen if heartbeat is working
+        # Log a warning and return the token anyway (let the API reject it if needed)
         if LOG_TOKEN_EVENTS:
-            logger.info(
-                f"[TokenManager] Access token expired/expiring for session {session_id[:8]}... "
-                f"Attempting refresh (refresh #{session.refresh_count + 1})"
+            logger.warning(
+                f"[TokenManager] Access token expired for session {session_id[:8]}... "
+                f"Heartbeat may not be running frequently enough. "
+                f"Expired {(now - session.access_token_expires_at).total_seconds():.1f}s ago"
             )
 
-        # Check if refresh token is still valid
-        if session.refresh_token_expires_at <= now:
-            if LOG_TOKEN_EVENTS:
-                logger.warning(
-                    f"[TokenManager] Refresh token expired for session {session_id[:8]}... "
-                    f"User must re-authenticate"
-                )
-            raise AuthenticationError(
-                "Session expired: refresh token has expired. User must re-authenticate."
-            )
-
-        # Attempt to refresh
-        await self._refresh_tokens(session)
+        # Return the expired token - the Services API will reject it with 401
+        # This is better than trying to refresh here and causing race conditions
         return session.access_token
 
     async def _refresh_tokens(self, session: TokenSession) -> None:

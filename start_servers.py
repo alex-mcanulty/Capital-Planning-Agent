@@ -2,7 +2,12 @@
 
 Uses Windows Terminal if available, otherwise falls back to PowerShell
 with QuickEdit mode disabled to prevent console freezing on click.
+
+Usage:
+    python start_servers.py          # Normal mode (QuickEdit disabled)
+    python start_servers.py --debug  # Debug mode (QuickEdit enabled for copy/paste)
 """
+import argparse
 import ctypes
 import subprocess
 import shutil
@@ -34,8 +39,16 @@ def find_windows_terminal():
     return None
 
 
-def start_server_process(name, command, cwd=None, wt_path=None):
-    """Start a server in a new Windows Terminal tab or PowerShell window"""
+def start_server_process(name, command, cwd=None, wt_path=None, debug_mode=False):
+    """Start a server in a new Windows Terminal tab or PowerShell window.
+
+    Args:
+        name: Display name for the server
+        command: Command to run
+        cwd: Working directory
+        wt_path: Path to Windows Terminal (if available)
+        debug_mode: If True, don't disable QuickEdit (allows copy/paste)
+    """
     print(f"Starting {name}...")
 
     working_dir = str(cwd) if cwd else str(Path.cwd())
@@ -51,28 +64,45 @@ def start_server_process(name, command, cwd=None, wt_path=None):
         ]
         process = subprocess.Popen(wt_args)
     else:
-        # Launch via a wrapper that disables QuickEdit using ctypes
-        disable_quickedit = (
-            "import ctypes; "
-            "k=ctypes.windll.kernel32; "
-            "h=k.GetStdHandle(-10); "
-            "m=ctypes.c_ulong(); "
-            "k.GetConsoleMode(h,ctypes.byref(m)); "
-            "k.SetConsoleMode(h,(m.value&~64)|128)"
-        )
-        wrapper_cmd = f'python -c "{disable_quickedit}"; {command}'
+        if debug_mode:
+            # Debug mode: don't disable QuickEdit, allowing copy/paste
+            ps_args = [
+                'powershell.exe',
+                '-NoExit',
+                '-Command',
+                f'$Host.UI.RawUI.WindowTitle = "{name}"; cd "{working_dir}"; {command}'
+            ]
+        else:
+            # Normal mode: disable QuickEdit to prevent freezing on click
+            disable_quickedit = (
+                "import ctypes; "
+                "k=ctypes.windll.kernel32; "
+                "h=k.GetStdHandle(-10); "
+                "m=ctypes.c_ulong(); "
+                "k.GetConsoleMode(h,ctypes.byref(m)); "
+                "k.SetConsoleMode(h,(m.value&~64)|128)"
+            )
+            wrapper_cmd = f'python -c "{disable_quickedit}"; {command}'
+            ps_args = [
+                'powershell.exe',
+                '-NoExit',
+                '-Command',
+                f'$Host.UI.RawUI.WindowTitle = "{name}"; cd "{working_dir}"; {wrapper_cmd}'
+            ]
 
-        ps_args = [
-            'powershell.exe',
-            '-NoExit',
-            '-Command',
-            f'$Host.UI.RawUI.WindowTitle = "{name}"; cd "{working_dir}"; {wrapper_cmd}'
-        ]
         process = subprocess.Popen(ps_args, creationflags=subprocess.CREATE_NEW_CONSOLE)
 
     return process
 
 def main():
+    parser = argparse.ArgumentParser(description="Start all Capital Planning servers")
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Enable debug mode (QuickEdit enabled for copy/paste from terminals)"
+    )
+    args = parser.parse_args()
+
     base_dir = Path(__file__).parent
 
     print("=" * 70)
@@ -87,7 +117,10 @@ def main():
         print("Each server will open in a separate Windows Terminal tab")
     else:
         print("Windows Terminal not found, using PowerShell windows")
-        print("(Tip: Install Windows Terminal to avoid QuickEdit freezing issues)")
+        if args.debug:
+            print("Debug mode: QuickEdit ENABLED (you can copy/paste, but clicking may freeze)")
+        else:
+            print("(Tip: Install Windows Terminal to avoid QuickEdit freezing issues)")
     print()
 
     # Start OIDC server
@@ -95,7 +128,8 @@ def main():
         "OIDC Server (port 8000)",
         "uv run python -m oidc_server.main",
         cwd=base_dir,
-        wt_path=wt_path
+        wt_path=wt_path,
+        debug_mode=args.debug
     )
     time.sleep(2)
 
@@ -104,7 +138,8 @@ def main():
         "Services API (port 8001)",
         "uv run python -m services.main",
         cwd=base_dir,
-        wt_path=wt_path
+        wt_path=wt_path,
+        debug_mode=args.debug
     )
     time.sleep(2)
 
@@ -113,7 +148,8 @@ def main():
         "MCP Server (streamable-http on port 8002)",
         "uv run python -m mcp_server.main",
         cwd=base_dir,
-        wt_path=wt_path
+        wt_path=wt_path,
+        debug_mode=args.debug
     )
     time.sleep(2)
 
@@ -122,7 +158,8 @@ def main():
         "Agent Service (port 8003)",
         "uv run python -m agent.main",
         cwd=base_dir,
-        wt_path=wt_path
+        wt_path=wt_path,
+        debug_mode=args.debug
     )
     time.sleep(2)
 
@@ -132,7 +169,8 @@ def main():
         "Frontend Server (port 8080)",
         "uv run python -m http.server 8080",
         cwd=frontend_dir,
-        wt_path=wt_path
+        wt_path=wt_path,
+        debug_mode=args.debug
     )
 
     print()

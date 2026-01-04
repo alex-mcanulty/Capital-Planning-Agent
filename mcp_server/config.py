@@ -16,9 +16,10 @@ TOKEN_REFRESH_BUFFER_SECONDS = 2
 LOG_TOKEN_EVENTS = os.getenv("LOG_TOKEN_EVENTS", "true").lower() == "true"
 
 # Token refresh heartbeat (in seconds)
-# This should be less than the refresh token lifetime to prevent expiration
-# For example, if refresh tokens expire in 30s, set this to 25s
-TOKEN_REFRESH_HEARTBEAT_SECONDS = int(os.getenv("TOKEN_REFRESH_HEARTBEAT_SECONDS", "25"))
+# This must be less than the ACCESS token lifetime to ensure tokens are always fresh.
+# The heartbeat is the ONLY place tokens are refreshed (no on-demand refresh).
+# Access tokens expire in 10s, so 8s ensures ~2s buffer before expiry.
+TOKEN_REFRESH_HEARTBEAT_SECONDS = int(os.getenv("TOKEN_REFRESH_HEARTBEAT_SECONDS", "8"))
 
 # Scope to tool mapping - defines which scopes are required for each tool
 TOOL_SCOPE_REQUIREMENTS = {
