@@ -1,12 +1,34 @@
-# Core dependencies for guardrail middleware
-langchain>=0.3.0
-langgraph>=0.2.0
+# =============================================================================
+# Guardrail Server Dependencies
+# =============================================================================
+
+# Server framework
+fastapi>=0.104.0
+uvicorn>=0.24.0
+pydantic>=2.0.0
+
+# ML models
 transformers>=4.30.0
 torch>=2.0.0
 
-# Optional: For faster inference with ONNX
+# =============================================================================
+# Guardrail Middleware (Client) Dependencies  
+# =============================================================================
+
+# HTTP client
+httpx>=0.25.0
+
+# LangChain (for middleware integration)
+langchain>=0.3.0
+langgraph>=0.2.0
+
+# =============================================================================
+# Optional Dependencies
+# =============================================================================
+
+# For faster inference with ONNX (server only)
 # optimum[onnxruntime]>=1.16.0
 
-# Optional: For GPU support (uncomment based on your CUDA version)
+# For GPU support (uncomment based on your CUDA version)
 # torch>=2.0.0+cu118  # For CUDA 11.8
 # torch>=2.0.0+cu121  # For CUDA 12.1
