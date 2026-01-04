@@ -246,3 +246,14 @@ function escapeHtml(text) {
     div.textContent = text;
     return div.innerHTML;
 }
+
+/**
+ * Fill the chat input with a test query (called from onclick)
+ */
+function fillChatInput(element) {
+    const query = element.getAttribute('data-query');
+    if (query && chatbotInput) {
+        chatbotInput.value = query;
+        chatbotInput.focus();
+    }
+}
