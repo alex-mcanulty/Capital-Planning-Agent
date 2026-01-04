@@ -1,0 +1,12 @@
+# Core dependencies for guardrail middleware
+langchain>=0.3.0
+langgraph>=0.2.0
+transformers>=4.30.0
+torch>=2.0.0
+
+# Optional: For faster inference with ONNX
+# optimum[onnxruntime]>=1.16.0
+
+# Optional: For GPU support (uncomment based on your CUDA version)
+# torch>=2.0.0+cu118  # For CUDA 11.8
+# torch>=2.0.0+cu121  # For CUDA 12.1

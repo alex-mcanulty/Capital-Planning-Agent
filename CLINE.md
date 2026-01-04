@@ -104,3 +104,34 @@ USERS = {
 Each chat request creates a new session, uses it for the duration of the agent run,
 then deletes it. This eliminates stale session issues and simplifies the design.
 Multiple concurrent requests (even from different browser tabs) each get their own session.
+
+## Development Preferences
+
+### Verbose Logging
+
+When building server scripts, always include verbose logging:
+- Log service startup with configuration details (ports, URLs, key settings)
+- Log incoming requests with relevant parameters (truncate tokens for security)
+- Log state changes (session created/deleted, token refreshed, etc.)
+- Log errors with full context and stack traces where appropriate
+- Use prefixes like `[OIDC]`, `[MCP]`, `[Agent]`, `[TokenManager]` to identify log sources
+
+Example:
+```python
+logger.info(f"[TokenManager] Session created: {session_id[:8]}... user={user_id}, scopes={scopes}")
+logger.info(f"[Agent] Created MCP session: {session_id[:16]}...")
+logger.warning(f"[TokenManager] Access token expired for session {session_id[:8]}...")
+```
+
+This makes debugging multi-service systems much easier since you can trace requests across services.
+
+### Design Collaboration
+
+When collaborating on design decisions:
+- **Read the code first** - Always examine the current state of the codebase before proposing changes
+- **Give objective opinions** - Provide honest technical analysis even if it contradicts initial assumptions
+- **Consider trade-offs** - Present multiple options with pros/cons when appropriate
+- **Question assumptions** - If something seems off, investigate before implementing
+- **Explain reasoning** - When recommending an approach, explain *why* it's preferred
+
+The goal is collaborative problem-solving, not just executing instructions. If you see a potential issue with a proposed approach, raise it before implementing.
