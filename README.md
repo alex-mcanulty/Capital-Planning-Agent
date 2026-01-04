@@ -98,20 +98,19 @@ Authentication is handled **per-user** with isolated sessions. The MCP server ac
    └── POST /authorize + POST /token
    └── Returns: access_token, refresh_token, user_id, scopes
 
-2. SESSION CREATION
-   Browser → MCP Server (8002)
+2. CHAT REQUEST (includes tokens)
+   Browser → Agent Service (8003)
+   └── POST /chat { message, access_token, refresh_token, scopes, user_id, history }
+
+3. SESSION CREATION (per agent invocation)
+   Agent → MCP Server (8002)
    └── POST /sessions { access_token, refresh_token, user_id, scopes }
    └── Returns: session_id
-   └── POST /sessions/{session_id}/activate
-
-3. CHAT REQUEST
-   Browser → Agent Service (8003)
-   └── POST /chat { message, session_id }
 
 4. TOOL EXECUTION
    Agent → MCP Server (8002)
-   └── MCP tool call (e.g., capital_get_assets)
-   └── MCP Server looks up active session_id
+   └── MCP tool call with X-Session-ID header
+   └── MCP Server looks up session by header
    └── TokenManager retrieves user's access_token
 
 5. API CALL
@@ -119,6 +118,10 @@ Authentication is handled **per-user** with isolated sessions. The MCP server ac
    └── GET /assets with Authorization: Bearer {user's access_token}
    └── Services validates JWT via OIDC's JWKS endpoint
    └── Returns data (if user has required scopes)
+
+6. SESSION CLEANUP
+   Agent → MCP Server (8002)
+   └── DELETE /sessions/{session_id} (when agent completes)
 ```
 
 ### Key Security Properties
@@ -129,13 +132,14 @@ Authentication is handled **per-user** with isolated sessions. The MCP server ac
 | **Token Storage** | Tokens stored in MCP server's `TokenManager`, never in agent/LLM context |
 | **Token Validation** | Services API validates JWTs using OIDC's public key (RS256 + JWKS) |
 | **Scope Enforcement** | Two-level: MCP checks scopes before API call, Services validates JWT claims |
-| **Token Refresh** | Automatic via 25-second heartbeat + per-request checks |
+| **Token Refresh** | Automatic via 8-second heartbeat (sole refresh mechanism) |
 
 ### Token Lifecycle
 
 - **Access Token**: 10 seconds (intentionally short to demonstrate refresh)
 - **Refresh Token**: 30 seconds (with rotation - each refresh gets new refresh token)
-- **Heartbeat**: Every 25 seconds, proactively refreshes all active sessions
+- **Heartbeat**: Every 8 seconds, proactively refreshes all active sessions
+- **Session Scope**: Sessions are created per agent invocation and deleted when complete
 
 This design ensures tokens stay fresh even during long-running operations (e.g., 8-second optimization calls).
 
@@ -183,9 +187,8 @@ Standard MCP servers are stateless - they receive a request, process it, and ret
 │  ┌─────────────────────────────────────────────────────────────────┐ │
 │  │                    REST API (Session Management)                │ │
 │  │  POST /sessions           - Create authenticated session        │ │
-│  │  POST /sessions/{id}/activate - Set active session              │ │
 │  │  GET  /sessions/{id}      - Get session info                    │ │
-│  │  DELETE /sessions/{id}    - Logout                              │ │
+│  │  DELETE /sessions/{id}    - Delete session                      │ │
 │  └─────────────────────────────────────────────────────────────────┘ │
 │  ┌─────────────────────────────────────────────────────────────────┐ │
 │  │                    MCP Endpoint (Tool Access)                   │ │
@@ -195,10 +198,9 @@ Standard MCP servers are stateless - they receive a request, process it, and ret
 │  ┌─────────────────────────────────────────────────────────────────┐ │
 │  │                    Stateful Token Manager                       │ │
 │  │  - Stores access + refresh tokens per session                   │ │
-│  │  - Checks token expiry before EVERY API call                    │ │
-│  │  - Automatically refreshes using refresh token                  │ │
+│  │  - Global heartbeat: refreshes ALL sessions every 8s            │ │
+│  │  - Heartbeat is sole refresh mechanism (no on-demand refresh)   │ │
 │  │  - Handles token rotation                                       │ │
-│  │  - Global heartbeat: refreshes ALL sessions every 25s           │ │
 │  └─────────────────────────────────────────────────────────────────┘ │
 │  ┌─────────────────────────────────────────────────────────────────┐ │
 │  │                    API Client (Backend Calls)                   │ │
@@ -371,6 +373,7 @@ capital-planner/
 ├── start_servers.py             # Automated server startup
 │
 ├── oidc_server/                 # Mock OIDC provider
+│   ├── README.md                # OIDC server documentation & Okta comparison
 │   ├── main.py                  # FastAPI OIDC server
 │   ├── config.py                # Token lifetimes, users
 │   ├── jwt_utils.py             # JWT creation/validation
@@ -416,7 +419,7 @@ ROTATE_REFRESH_TOKENS = True # Enable token rotation
 ### Heartbeat Interval (`mcp_server/config.py`)
 
 ```python
-TOKEN_REFRESH_HEARTBEAT_SECONDS = 25  # Must be < REFRESH_TOKEN_LIFETIME
+TOKEN_REFRESH_HEARTBEAT_SECONDS = 8  # Must be < ACCESS_TOKEN_LIFETIME (10s)
 ```
 
 ### Operation Delays (`services/config.py`)
@@ -461,10 +464,8 @@ ENDPOINT_DELAYS = {
 
 - `GET /health` - Health check
 - `POST /sessions` - Create authenticated session
-- `POST /sessions/{id}/activate` - Set active session for MCP tools
 - `GET /sessions/{id}` - Get session information
-- `DELETE /sessions/{id}` - Delete session (logout)
-- `GET /sessions/active/info` - Get active session info
+- `DELETE /sessions/{id}` - Delete session
 
 ### MCP Server Tools (http://localhost:8002/mcp/streamable)
 
@@ -477,5 +478,6 @@ Accessed via MCP protocol:
 
 ### Agent Service (http://localhost:8003)
 
-- `POST /chat` - Chat with agent (returns SSE stream)
-- `POST /session` - Create MCP session with tokens
+- `GET /health` - Health check
+- `POST /chat/stream` - Chat with agent (returns SSE stream)
+- `POST /chat` - Chat with agent (non-streaming, for testing)
