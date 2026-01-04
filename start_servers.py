@@ -153,6 +153,18 @@ def main():
     )
     time.sleep(2)
 
+    # Start Guardrail Server (loads ML models, may take longer)
+    start_server_process(
+        "Guardrail Server (port 8004)",
+        "uv run python -m guardrails.guardrail_server",
+        cwd=base_dir,
+        wt_path=wt_path,
+        debug_mode=args.debug
+    )
+    # Allow extra time for ML models to load
+    print("  (Waiting for guardrail models to load...)")
+    time.sleep(10)
+
     # Start Agent Service
     start_server_process(
         "Agent Service (port 8003)",
@@ -179,11 +191,12 @@ def main():
     print("=" * 70)
     print()
     print("Services running:")
-    print("  - OIDC Server:    http://localhost:8000")
-    print("  - Services API:   http://localhost:8001")
-    print("  - MCP Server:     http://localhost:8002")
-    print("  - Agent Service:  http://localhost:8003")
-    print("  - Frontend:       http://localhost:8080")
+    print("  - OIDC Server:      http://localhost:8000")
+    print("  - Services API:     http://localhost:8001")
+    print("  - MCP Server:       http://localhost:8002")
+    print("  - Agent Service:    http://localhost:8003")
+    print("  - Guardrail Server: http://localhost:8004")
+    print("  - Frontend:         http://localhost:8080")
     print()
     print("Open http://localhost:8080 in your browser to start testing")
     print()

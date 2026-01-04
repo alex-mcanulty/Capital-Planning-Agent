@@ -314,14 +314,28 @@ async def health_check():
 async def detect_injection(request: DetectionRequest):
     """
     Detect prompt injection attacks in the provided text.
-    
+
     Uses the ProtectAI DeBERTa model for detection.
     """
     if not model_manager.injection_classifier:
         raise HTTPException(status_code=503, detail="Injection model not loaded")
-    
+
     try:
         result = model_manager.detect_injection(request.text, request.threshold)
+
+        # Log detection results
+        text_preview = request.text[:80].replace('\n', ' ')
+        if result["detected"]:
+            logger.warning(
+                f"[INJECTION DETECTED] score={result['score']:.4f} "
+                f"threshold={result['threshold']} text=\"{text_preview}...\""
+            )
+        else:
+            logger.info(
+                f"[injection check] label={result['label']} score={result['score']:.4f} "
+                f"time={result['inference_time_ms']:.1f}ms text=\"{text_preview}...\""
+            )
+
         return DetectionResponse(**result)
     except Exception as e:
         logger.error(f"Error during injection detection: {e}")
@@ -332,14 +346,28 @@ async def detect_injection(request: DetectionRequest):
 async def detect_toxicity(request: DetectionRequest):
     """
     Detect toxicity (hate, abuse, profanity) in the provided text.
-    
+
     Uses the IBM Granite Guardian HAP model for detection.
     """
     if not model_manager.hap_model:
         raise HTTPException(status_code=503, detail="HAP model not loaded")
-    
+
     try:
         result = model_manager.detect_toxicity(request.text, request.threshold)
+
+        # Log detection results
+        text_preview = request.text[:80].replace('\n', ' ')
+        if result["detected"]:
+            logger.warning(
+                f"[TOXICITY DETECTED] score={result['score']:.4f} "
+                f"threshold={result['threshold']} text=\"{text_preview}...\""
+            )
+        else:
+            logger.info(
+                f"[toxicity check] label={result['label']} score={result['score']:.4f} "
+                f"time={result['inference_time_ms']:.1f}ms text=\"{text_preview}...\""
+            )
+
         return DetectionResponse(**result)
     except Exception as e:
         logger.error(f"Error during toxicity detection: {e}")
@@ -374,12 +402,11 @@ async def detect_toxicity_batch(request: BatchDetectionRequest):
 
 if __name__ == "__main__":
     import uvicorn
-    
+
     logger.info(f"Starting server on {config.HOST}:{config.PORT}")
     uvicorn.run(
-        "guardrail_server:app",
+        app,
         host=config.HOST,
         port=config.PORT,
-        reload=False,
         log_level="info",
     )

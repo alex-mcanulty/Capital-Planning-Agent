@@ -27,6 +27,12 @@ from langchain.agents import create_agent
 from langchain_mcp_adapters.client import MultiServerMCPClient
 
 from .agent_instruction import capital_planner_instruction
+from .guardrails import (
+    GuardrailMiddleware,
+    check_guardrail_server_health,
+    GUARDRAIL_SERVER_URL,
+    GUARDRAIL_ENABLED,
+)
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -45,6 +51,9 @@ llm = None
 
 # HTTP client for MCP session management
 http_client: httpx.AsyncClient = None
+
+# Guardrail middleware (shared across requests)
+guardrails_middleware: GuardrailMiddleware | None = None
 
 
 async def create_mcp_session(
@@ -128,11 +137,13 @@ async def create_agent_with_session(session_id: str):
     mcp_tools = await mcp_client.get_tools()
     logger.info(f"[Agent] Loaded {len(mcp_tools)} tools for session {session_id[:16]}...")
 
-    # Create agent with these tools
+    # Create agent with these tools and guardrails middleware
+    middleware = [guardrails_middleware] if guardrails_middleware else []
     agent = create_agent(
         model=llm,
         tools=mcp_tools,
-        system_prompt=capital_planner_instruction
+        system_prompt=capital_planner_instruction,
+        middleware=middleware,
     )
 
     return agent, mcp_client
@@ -141,7 +152,7 @@ async def create_agent_with_session(session_id: str):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Initialize and cleanup resources."""
-    global llm, http_client
+    global llm, http_client, guardrails_middleware
 
     logger.info("[Agent] Starting Capital Planning Agent Service")
 
@@ -158,10 +169,28 @@ async def lifespan(app: FastAPI):
 
     logger.info("[Agent] LLM initialized, ready to accept requests")
 
+    # Initialize guardrails middleware if enabled
+    if GUARDRAIL_ENABLED:
+        guardrails_healthy = await check_guardrail_server_health()
+        if guardrails_healthy:
+            guardrails_middleware = GuardrailMiddleware()
+            logger.info(f"[Agent] Guardrails middleware initialized (server={GUARDRAIL_SERVER_URL})")
+        else:
+            logger.warning(
+                f"[Agent] Guardrail server not available at {GUARDRAIL_SERVER_URL} - "
+                "running WITHOUT guardrails protection"
+            )
+            guardrails_middleware = None
+    else:
+        logger.info("[Agent] Guardrails disabled via GUARDRAIL_ENABLED=false")
+        guardrails_middleware = None
+
     yield
 
     # Cleanup
     logger.info("[Agent] Shutting down...")
+    if guardrails_middleware:
+        await guardrails_middleware.client.close()
     if http_client:
         await http_client.aclose()
 
@@ -215,7 +244,8 @@ async def health():
     return {
         "status": "ok",
         "service": "capital-planning-agent",
-        "llm_ready": llm is not None
+        "llm_ready": llm is not None,
+        "guardrails_enabled": guardrails_middleware is not None,
     }
 
 
