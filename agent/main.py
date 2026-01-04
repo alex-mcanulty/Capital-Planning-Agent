@@ -24,6 +24,7 @@ from pydantic import BaseModel, Field
 from langchain_openai import ChatOpenAI
 from langsmith import traceable
 from langchain.agents import create_agent
+from langchain.messages import AIMessage
 from langchain_mcp_adapters.client import MultiServerMCPClient
 
 from .agent_instruction import capital_planner_instruction
@@ -347,8 +348,36 @@ async def stream_agent_response(
                 yield f"\n"  # Empty line to end the SSE message
 
                 current_message_content = chunk_content
+
             else:
-                logger.warning(f"[Agent] Unexpected message type: {message_type}")
+                # Handle middleware chunks (e.g., GuardrailMiddleware.before_agent)
+                # Check if the chunk contains messages with AIMessage content
+                chunk_data = chunk.get(message_type, {})
+                messages = chunk_data.get("messages", []) if isinstance(chunk_data, dict) else []
+
+                for msg in messages:
+                    if isinstance(msg, AIMessage) and msg.content:
+                        chunk_content = msg.content
+                        logger.info(f"[Agent] Middleware message ({len(chunk_content)} chars): {chunk_content[:200]}...")
+
+                        # Send message_start event if not started
+                        if not message_started:
+                            logger.info("[Agent] Sending message_start event")
+                            yield f"event: message_start\n"
+                            yield f"data: assistant\n\n"
+                            message_started = True
+
+                        # Send content chunk
+                        yield f"event: message_chunk\n"
+                        for line in chunk_content.split('\n'):
+                            yield f"data: {line}\n"
+                        yield f"\n"
+
+                        current_message_content = chunk_content
+                        break  # Only process first AIMessage
+                else:
+                    # No AIMessage found in this chunk
+                    logger.debug(f"[Agent] Skipping chunk type: {message_type}")
 
         # Send message_end event
         logger.info(f"[Agent] Stream complete. Total chunks: {chunk_count}, message_started: {message_started}")

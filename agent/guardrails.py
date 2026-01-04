@@ -176,8 +176,7 @@ class GuardrailMiddleware(AgentMiddleware):
         enable_input_guardrail: bool = True,
         injection_threshold: float = INJECTION_THRESHOLD,
         input_refusal_message: str = (
-            "I'm sorry, but I cannot process this request as it appears to "
-            "contain content that could manipulate my behavior."
+            "I cannot help you with this. This incident has been logged and reported."
         ),
         # Output guardrail settings
         enable_output_guardrail: bool = True,
