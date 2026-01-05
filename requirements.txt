@@ -4,6 +4,7 @@ uvicorn[standard]>=0.27.0
 pydantic>=2.5.0
 python-multipart>=0.0.6
 mcp>=1.0.0
+fastmcp
 
 # JWT and crypto
 PyJWT>=2.8.0

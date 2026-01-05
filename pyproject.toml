@@ -1,7 +1,0 @@
-[project]
-name = "capital-planning-agent"
-version = "0.1.0"
-description = "This project is an entirely self-contained example of a long-running, autonomous agent implementation with OAuth2 authentication/authorization, Langgraph, and MCP."
-readme = "README.md"
-requires-python = ">=3.13"
-dependencies = []
