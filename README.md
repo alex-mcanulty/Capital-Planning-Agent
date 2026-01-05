@@ -2,6 +2,8 @@
 
 A production-ready demonstration of an autonomous AI agent for capital planning workflows, featuring OAuth 2.0 authentication, automatic token refresh, and a novel stateful MCP server architecture designed for long-running autonomous operations.
 
+See Solution Diagram in project root for workflow illustration.
+
 ## Project Overview
 
 This system demonstrates how to build an agentic AI application that:
@@ -452,8 +454,6 @@ Test queries included:
 ```
 capital-planner/
 ├── README.md                    # This file
-├── DESIGN.md                    # Detailed design document
-├── CLAUDE.md                    # Project overview for Claude
 ├── requirements.txt             # Python dependencies
 ├── .env.example                 # Environment variable template
 ├── start_servers.py             # Automated server startup
