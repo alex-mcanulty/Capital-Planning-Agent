@@ -553,3 +553,231 @@ body {
     flex-shrink: 0;
     width: auto !important; /* Override .btn-primary width: 100% */
 }
+
+/* Structured Output Panel */
+.structured-output-panel {
+    width: 380px;
+    flex-shrink: 0;
+    background: white;
+    border: 1px solid #e0e0e0;
+    border-radius: 8px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.structured-output-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 16px;
+    background: #f8f9fa;
+    border-bottom: 1px solid #e0e0e0;
+}
+
+.structured-output-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: #333;
+}
+
+.structured-output-status {
+    font-size: 11px;
+    padding: 3px 8px;
+    border-radius: 10px;
+    background: #e9ecef;
+    color: #666;
+}
+
+.structured-output-status.loading {
+    background: #fff3cd;
+    color: #856404;
+}
+
+.structured-output-status.ready {
+    background: #d4edda;
+    color: #155724;
+}
+
+.structured-output-status.error {
+    background: #f8d7da;
+    color: #721c24;
+}
+
+.structured-output-content {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px;
+    font-size: 13px;
+}
+
+.structured-output-placeholder {
+    color: #999;
+    text-align: center;
+    padding: 40px 20px;
+    font-style: italic;
+}
+
+/* Structured Output Sections */
+.so-section {
+    margin-bottom: 16px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid #eee;
+}
+
+.so-section:last-child {
+    border-bottom: none;
+    margin-bottom: 0;
+    padding-bottom: 0;
+}
+
+.so-section-title {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: #666;
+    margin-bottom: 8px;
+}
+
+.so-summary {
+    font-size: 14px;
+    line-height: 1.5;
+    color: #333;
+    background: #f8f9fa;
+    padding: 12px;
+    border-radius: 6px;
+    border-left: 3px solid #667eea;
+}
+
+/* Risk Assets List */
+.so-risk-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.so-risk-item {
+    background: #fff;
+    border: 1px solid #e0e0e0;
+    border-radius: 6px;
+    padding: 10px 12px;
+}
+
+.so-risk-item-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 4px;
+}
+
+.so-risk-item-name {
+    font-weight: 500;
+    color: #333;
+    font-size: 13px;
+}
+
+.so-risk-score {
+    font-size: 12px;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 10px;
+}
+
+.so-risk-score.high {
+    background: #f8d7da;
+    color: #721c24;
+}
+
+.so-risk-score.medium {
+    background: #fff3cd;
+    color: #856404;
+}
+
+.so-risk-score.low {
+    background: #d4edda;
+    color: #155724;
+}
+
+.so-risk-item-details {
+    font-size: 11px;
+    color: #666;
+}
+
+/* Investment Plan */
+.so-plan-summary {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    margin-bottom: 12px;
+}
+
+.so-plan-stat {
+    background: #f8f9fa;
+    padding: 10px;
+    border-radius: 6px;
+    text-align: center;
+}
+
+.so-plan-stat-value {
+    font-size: 18px;
+    font-weight: 600;
+    color: #333;
+}
+
+.so-plan-stat-label {
+    font-size: 10px;
+    color: #666;
+    text-transform: uppercase;
+    margin-top: 2px;
+}
+
+/* Interventions List */
+.so-intervention-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.so-intervention-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 10px;
+    background: #f8f9fa;
+    border-radius: 4px;
+    font-size: 12px;
+}
+
+.so-intervention-name {
+    color: #333;
+}
+
+.so-intervention-cost {
+    font-weight: 500;
+    color: #28a745;
+}
+
+/* Key Findings */
+.so-findings-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+
+.so-findings-list li {
+    position: relative;
+    padding-left: 16px;
+    margin-bottom: 6px;
+    font-size: 12px;
+    color: #444;
+    line-height: 1.4;
+}
+
+.so-findings-list li::before {
+    content: "•";
+    position: absolute;
+    left: 0;
+    color: #667eea;
+    font-weight: bold;
+}

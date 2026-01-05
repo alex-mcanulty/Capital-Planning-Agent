@@ -9,6 +9,7 @@ Session Management:
 - Agent deletes the MCP session when the invocation completes
 - This ensures sessions are scoped to agent invocations, not browser sessions
 """
+import json
 import os
 import asyncio
 import logging
@@ -28,12 +29,32 @@ from langchain.messages import AIMessage
 from langchain_mcp_adapters.client import MultiServerMCPClient
 
 from .agent_instruction import capital_planner_instruction
+from .schemas import CapitalPlanningResponse
 from .guardrails import (
     GuardrailMiddleware,
     check_guardrail_server_health,
     GUARDRAIL_SERVER_URL,
     GUARDRAIL_ENABLED,
 )
+
+# Prompt for extracting structured output from agent response
+STRUCTURED_OUTPUT_PROMPT = """You are a data extraction assistant. Your task is to extract structured information from a capital planning analysis response.
+
+Given the following analysis response from a capital planning agent, extract the key information into the specified JSON format.
+
+ANALYSIS RESPONSE:
+{response}
+
+Extract the information into this JSON structure. Use null for fields that cannot be determined from the response:
+- summary: A 2-3 sentence executive summary
+- analysis_horizon_months: The time horizon in months (if mentioned)
+- high_risk_assets: List of high-risk assets with asset_id, asset_name, asset_type, risk_score (0-100), probability_of_failure (0-1), consequence_score (0-100)
+- investment_plan: Summary with total_budget, total_cost, budget_utilization (0-1), total_risk_reduction, num_assets_addressed
+- selected_investments: List of investments with asset_id, asset_name, intervention_type, cost, expected_risk_reduction (0-1)
+- key_findings: List of key insight strings
+- limitations: Any noted limitations or caveats
+
+Return ONLY valid JSON matching this structure. Do not include any markdown formatting or code blocks."""
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -55,6 +76,45 @@ http_client: httpx.AsyncClient = None
 
 # Guardrail middleware (shared across requests)
 guardrails_middleware: GuardrailMiddleware | None = None
+
+
+async def extract_structured_output(response_content: str) -> dict | None:
+    """Extract structured output from agent response using a separate LLM call.
+
+    This uses OpenAI's native structured output mode on a standalone call
+    (not with tools) to parse the agent's response into our schema.
+
+    Args:
+        response_content: The full text response from the agent
+
+    Returns:
+        Parsed CapitalPlanningResponse dict, or None if extraction fails
+    """
+    if not response_content or len(response_content) < 50:
+        logger.info("[Agent] Response too short for structured extraction")
+        return None
+
+    try:
+        # Create a separate LLM instance with structured output
+        structured_llm = ChatOpenAI(
+            model_name="gpt-4o-mini",
+            temperature=0
+        ).with_structured_output(CapitalPlanningResponse)
+
+        # Extract structured data
+        prompt = STRUCTURED_OUTPUT_PROMPT.format(response=response_content)
+        result = await structured_llm.ainvoke(prompt)
+
+        if result:
+            logger.info("[Agent] Successfully extracted structured output")
+            return result.model_dump()
+        else:
+            logger.warning("[Agent] Structured extraction returned None")
+            return None
+
+    except Exception as e:
+        logger.error(f"[Agent] Failed to extract structured output: {e}")
+        return None
 
 
 async def create_mcp_session(
@@ -353,6 +413,7 @@ async def stream_agent_response(
                 # Handle middleware chunks (e.g., GuardrailMiddleware.before_agent)
                 # Check if the chunk contains messages with AIMessage content
                 chunk_data = chunk.get(message_type, {})
+
                 messages = chunk_data.get("messages", []) if isinstance(chunk_data, dict) else []
 
                 for msg in messages:
@@ -387,6 +448,18 @@ async def stream_agent_response(
             yield f"data: \n\n"
         else:
             logger.warning("[Agent] Stream ended but no message was started!")
+
+        # Extract and send structured response via post-processing
+        if current_message_content and len(current_message_content) >= 50:
+            logger.info("[Agent] Extracting structured output from response...")
+            structured_data = await extract_structured_output(current_message_content)
+            if structured_data:
+                logger.info("[Agent] Sending structured_response event")
+                response_json = json.dumps(structured_data)
+                yield f"event: structured_response\n"
+                yield f"data: {response_json}\n\n"
+            else:
+                logger.info("[Agent] No structured data extracted")
 
     except Exception as e:
         logger.error(f"[Agent] Error during streaming: {e}", exc_info=True)

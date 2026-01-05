@@ -44,6 +44,10 @@ async function sendMessage() {
     chatbotInput.disabled = true;
     chatbotSend.disabled = true;
 
+    // Reset and set structured output to loading state
+    resetStructuredOutput();
+    setStructuredOutputStatus('loading', 'Processing...');
+
     try {
         // Create assistant message placeholder
         const assistantMessageId = addMessage('assistant', '', true);
@@ -54,6 +58,7 @@ async function sendMessage() {
     } catch (error) {
         console.error('Error sending message:', error);
         addMessage('assistant', `❌ Error: ${error.message}`);
+        setStructuredOutputStatus('error', 'Error');
     } finally {
         // Re-enable input
         isStreaming = false;
@@ -195,9 +200,18 @@ async function streamAgentResponse(message, assistantMessageId) {
                         content: currentMessageContent
                     });
                 }
+            } else if (eventType === 'structured_response') {
+                console.log('[Chatbot] Structured response received');
+                try {
+                    const structuredData = JSON.parse(data);
+                    displayStructuredOutput(structuredData);
+                } catch (e) {
+                    console.error('[Chatbot] Failed to parse structured response:', e);
+                }
             } else if (eventType === 'error') {
                 console.error(`[Chatbot] Error event: ${data}`);
                 updateMessageContent(assistantMessageId, `❌ Error: ${data}`);
+                setStructuredOutputStatus('error', 'Error');
                 throw new Error(data);
             }
         }
@@ -262,4 +276,168 @@ function fillChatInput(element) {
         chatbotInput.value = query;
         chatbotInput.focus();
     }
+}
+
+// =============================================================================
+// Structured Output Display
+// =============================================================================
+
+const structuredOutputContent = document.getElementById('structured-output-content');
+const structuredOutputStatus = document.getElementById('structured-output-status');
+
+/**
+ * Set the status indicator for structured output panel
+ */
+function setStructuredOutputStatus(status, text) {
+    structuredOutputStatus.className = 'structured-output-status';
+    if (status) {
+        structuredOutputStatus.classList.add(status);
+    }
+    structuredOutputStatus.textContent = text;
+}
+
+/**
+ * Reset structured output panel to waiting state
+ */
+function resetStructuredOutput() {
+    setStructuredOutputStatus('', 'Waiting...');
+    structuredOutputContent.innerHTML = `
+        <div class="structured-output-placeholder">
+            Structured analysis results will appear here after the agent completes its response.
+        </div>
+    `;
+}
+
+/**
+ * Display structured output data in the panel
+ */
+function displayStructuredOutput(data) {
+    setStructuredOutputStatus('ready', 'Ready');
+
+    let html = '';
+
+    // Summary section
+    if (data.summary) {
+        html += `
+            <div class="so-section">
+                <div class="so-section-title">Summary</div>
+                <div class="so-summary">${escapeHtml(data.summary)}</div>
+            </div>
+        `;
+    }
+
+    // High Risk Assets section
+    if (data.high_risk_assets && data.high_risk_assets.length > 0) {
+        html += `
+            <div class="so-section">
+                <div class="so-section-title">High Risk Assets (${data.high_risk_assets.length})</div>
+                <div class="so-risk-list">
+                    ${data.high_risk_assets.map(asset => {
+                        const riskClass = asset.risk_score >= 70 ? 'high' : (asset.risk_score >= 40 ? 'medium' : 'low');
+                        return `
+                            <div class="so-risk-item">
+                                <div class="so-risk-item-header">
+                                    <span class="so-risk-item-name">${escapeHtml(asset.asset_name)}</span>
+                                    <span class="so-risk-score ${riskClass}">${asset.risk_score.toFixed(1)}</span>
+                                </div>
+                                <div class="so-risk-item-details">
+                                    ${escapeHtml(asset.asset_type)} · PoF: ${(asset.probability_of_failure * 100).toFixed(1)}%
+                                </div>
+                            </div>
+                        `;
+                    }).join('')}
+                </div>
+            </div>
+        `;
+    }
+
+    // Investment Plan section
+    if (data.investment_plan) {
+        const plan = data.investment_plan;
+        html += `
+            <div class="so-section">
+                <div class="so-section-title">Investment Plan</div>
+                <div class="so-plan-summary">
+                    <div class="so-plan-stat">
+                        <div class="so-plan-stat-value">$${formatCurrency(plan.total_cost)}</div>
+                        <div class="so-plan-stat-label">Total Cost</div>
+                    </div>
+                    <div class="so-plan-stat">
+                        <div class="so-plan-stat-value">${plan.num_assets_addressed}</div>
+                        <div class="so-plan-stat-label">Assets</div>
+                    </div>
+                    ${plan.budget_utilization !== null ? `
+                        <div class="so-plan-stat">
+                            <div class="so-plan-stat-value">${(plan.budget_utilization * 100).toFixed(0)}%</div>
+                            <div class="so-plan-stat-label">Budget Used</div>
+                        </div>
+                    ` : ''}
+                    <div class="so-plan-stat">
+                        <div class="so-plan-stat-value">${plan.total_risk_reduction.toFixed(2)}</div>
+                        <div class="so-plan-stat-label">Risk Reduced</div>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    // Selected Investments section
+    if (data.selected_investments && data.selected_investments.length > 0) {
+        html += `
+            <div class="so-section">
+                <div class="so-section-title">Selected Investments (${data.selected_investments.length})</div>
+                <div class="so-intervention-list">
+                    ${data.selected_investments.map(inv => `
+                        <div class="so-intervention-item">
+                            <span class="so-intervention-name">${escapeHtml(inv.asset_name)} - ${escapeHtml(inv.intervention_type)}</span>
+                            <span class="so-intervention-cost">$${formatCurrency(inv.cost)}</span>
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
+        `;
+    }
+
+    // Key Findings section
+    if (data.key_findings && data.key_findings.length > 0) {
+        html += `
+            <div class="so-section">
+                <div class="so-section-title">Key Findings</div>
+                <ul class="so-findings-list">
+                    ${data.key_findings.map(finding => `<li>${escapeHtml(finding)}</li>`).join('')}
+                </ul>
+            </div>
+        `;
+    }
+
+    // Limitations section
+    if (data.limitations) {
+        html += `
+            <div class="so-section">
+                <div class="so-section-title">Limitations</div>
+                <div style="font-size: 12px; color: #666; font-style: italic;">
+                    ${escapeHtml(data.limitations)}
+                </div>
+            </div>
+        `;
+    }
+
+    // If no data was rendered, show a message
+    if (!html) {
+        html = '<div class="structured-output-placeholder">No structured data available.</div>';
+    }
+
+    structuredOutputContent.innerHTML = html;
+}
+
+/**
+ * Format currency values (thousands with K, millions with M)
+ */
+function formatCurrency(value) {
+    if (value >= 1000000) {
+        return (value / 1000000).toFixed(1) + 'M';
+    } else if (value >= 1000) {
+        return (value / 1000).toFixed(0) + 'K';
+    }
+    return value.toFixed(0);
 }
