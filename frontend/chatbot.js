@@ -92,14 +92,20 @@ function addMessage(role, content, isPlaceholder = false) {
 }
 
 /**
- * Add a tool call indicator
+ * Add a tool call indicator above the assistant message
  */
-function addToolCallIndicator(toolName) {
+function addToolCallIndicator(toolName, assistantMessageId) {
     const toolDiv = document.createElement('div');
     toolDiv.className = 'chatbot-tool-call';
     toolDiv.innerHTML = `🛠️ Using tool: <strong>${toolName}</strong>`;
 
-    chatbotMessages.appendChild(toolDiv);
+    // Insert before the assistant message element so tool calls appear above
+    const assistantMessage = document.getElementById(assistantMessageId);
+    if (assistantMessage) {
+        chatbotMessages.insertBefore(toolDiv, assistantMessage);
+    } else {
+        chatbotMessages.appendChild(toolDiv);
+    }
     chatbotMessages.scrollTop = chatbotMessages.scrollHeight;
 }
 
@@ -179,7 +185,7 @@ async function streamAgentResponse(message, assistantMessageId) {
                 updateMessageContent(assistantMessageId, currentMessageContent);
             } else if (eventType === 'tool_call') {
                 console.log(`[Chatbot] Tool call: ${data}`);
-                addToolCallIndicator(data);
+                addToolCallIndicator(data, assistantMessageId);
             } else if (eventType === 'message_end') {
                 console.log('[Chatbot] Message ended');
                 // Message complete - add to history
