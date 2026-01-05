@@ -12,7 +12,7 @@ cryptography>=42.0.0
 # HTTP client
 httpx>=0.26.0
 
-# CORS
+# Utilities
 python-jose[cryptography]>=3.3.0
 python-dotenv>=1.0.0
 
@@ -20,4 +20,9 @@ python-dotenv>=1.0.0
 langchain
 langchain_mcp_adapters
 langchain_openai
-gradio
+langgraph
+langsmith
+
+# Guardrails server dependencies (ML models)
+torch
+transformers

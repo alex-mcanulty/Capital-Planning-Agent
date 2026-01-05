@@ -13,10 +13,18 @@ import json
 import os
 import asyncio
 import logging
+from pathlib import Path
 from typing import AsyncGenerator
 from contextlib import asynccontextmanager
 
+from dotenv import load_dotenv
 import httpx
+
+# Load environment variables from .env file if it exists
+env_path = Path(__file__).parent.parent / ".env"
+if env_path.exists():
+    load_dotenv(env_path)
+    logging.info(f"[Agent] Loaded environment variables from {env_path}")
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse

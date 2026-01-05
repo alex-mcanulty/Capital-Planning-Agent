@@ -200,6 +200,9 @@ async function streamAgentResponse(message, assistantMessageId) {
                         content: currentMessageContent
                     });
                 }
+                // Update status to show extraction is happening
+                setStructuredOutputStatus('loading', 'Extracting...');
+                showStructuredOutputSpinner();
             } else if (eventType === 'structured_response') {
                 console.log('[Chatbot] Structured response received');
                 try {
@@ -304,6 +307,18 @@ function resetStructuredOutput() {
     structuredOutputContent.innerHTML = `
         <div class="structured-output-placeholder">
             Structured analysis results will appear here after the agent completes its response.
+        </div>
+    `;
+}
+
+/**
+ * Show a spinner in the structured output panel during extraction
+ */
+function showStructuredOutputSpinner() {
+    structuredOutputContent.innerHTML = `
+        <div class="structured-output-loading">
+            <div class="so-spinner"></div>
+            <div class="so-loading-text">Analyzing response and extracting structured data...</div>
         </div>
     `;
 }
