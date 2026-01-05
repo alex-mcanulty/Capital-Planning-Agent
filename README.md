@@ -166,6 +166,8 @@ Authentication is handled **per-user** with isolated sessions. The MCP server ac
 
 This design ensures tokens stay fresh even during long-running operations (e.g., 8-second optimization calls).
 
+This design is meant to simulate extreme production scenarios where agent runtimes (or even individual tool calls) exceed the lifetime of both the access tokens and the longer lived refresh tokens. 
+ 
 ## Architecture: Stateful MCP Server
 
 This project implements a **hybrid MCP server architecture** that solves a critical challenge: how to manage OAuth token lifecycle for long-running autonomous agent workflows.
