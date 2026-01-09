@@ -18,12 +18,12 @@ python-jose[cryptography]>=3.3.0
 python-dotenv>=1.0.0
 
 # Agent dependencies
-langchain
-langchain_mcp_adapters
-langchain_openai
-langgraph
-langsmith
+langchain==1.2.3
+langchain_mcp_adapters==0.2.1
+langchain_openai==1.1.7
+langgraph==1.0.5
+langsmith==0.6.2
 
 # Guardrails server dependencies (ML models)
-torch
-transformers
+torch==2.9.1
+transformers==4.57.3
