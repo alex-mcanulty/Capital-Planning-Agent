@@ -45,25 +45,6 @@ from .guardrails import (
     GUARDRAIL_ENABLED,
 )
 
-# Prompt for extracting structured output from agent response
-STRUCTURED_OUTPUT_PROMPT = """You are a data extraction assistant. Your task is to extract structured information from a capital planning analysis response.
-
-Given the following analysis response from a capital planning agent, extract the key information into the specified JSON format.
-
-ANALYSIS RESPONSE:
-{response}
-
-Extract the information into this JSON structure. Use null for fields that cannot be determined from the response:
-- summary: A 2-3 sentence executive summary
-- analysis_horizon_months: The time horizon in months (if mentioned)
-- high_risk_assets: List of high-risk assets with asset_id, asset_name, asset_type, risk_score (0-100), probability_of_failure (0-1), consequence_score (0-100)
-- investment_plan: Summary with total_budget, total_cost, budget_utilization (0-1), total_risk_reduction, num_assets_addressed
-- selected_investments: List of investments with asset_id, asset_name, intervention_type, cost, expected_risk_reduction (0-1)
-- key_findings: List of key insight strings
-- limitations: Any noted limitations or caveats
-
-Return ONLY valid JSON matching this structure. Do not include any markdown formatting or code blocks."""
-
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -84,6 +65,26 @@ http_client: httpx.AsyncClient = None
 
 # Guardrail middleware (shared across requests)
 guardrails_middleware: GuardrailMiddleware | None = None
+
+
+# Prompt for extracting structured output from agent response
+STRUCTURED_OUTPUT_PROMPT = """You are a data extraction assistant. Your task is to extract structured information from a capital planning analysis response.
+
+Given the following analysis response from a capital planning agent, extract the key information into the specified JSON format.
+
+ANALYSIS RESPONSE:
+{response}
+
+Extract the information into this JSON structure. Use null for fields that cannot be determined from the response:
+- summary: A 2-3 sentence executive summary
+- analysis_horizon_months: The time horizon in months (if mentioned)
+- high_risk_assets: List of high-risk assets with asset_id, asset_name, asset_type, risk_score (0-100), probability_of_failure (0-1), consequence_score (0-100)
+- investment_plan: Summary with total_budget, total_cost, budget_utilization (0-1), total_risk_reduction, num_assets_addressed
+- selected_investments: List of investments with asset_id, asset_name, intervention_type, cost, expected_risk_reduction (0-1)
+- key_findings: List of key insight strings
+- limitations: Any noted limitations or caveats
+
+Return ONLY valid JSON matching this structure. Do not include any markdown formatting or code blocks."""
 
 
 async def extract_structured_output(response_content: str) -> dict | None:

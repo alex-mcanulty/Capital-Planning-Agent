@@ -35,6 +35,8 @@ from .models import (
     GetAssetInput,
     AnalyzeRiskInput,
     OptimizeInvestmentsInput,
+    InvestmentCandidate,
+    ResponseFormat,
     CreateSessionRequest,
     SessionResponse,
     SessionInfoResponse,
@@ -214,34 +216,40 @@ async def capital_analyze_risk(params: AnalyzeRiskInput) -> str:
         "openWorldHint": True,
     }
 )
-async def capital_optimize_investments(params: OptimizeInvestmentsInput) -> str:
+async def capital_optimize_investments(
+    candidates: list[InvestmentCandidate],
+    budget: float,
+    horizon_months: int = 12,
+    response_format: ResponseFormat = ResponseFormat.MARKDOWN
+) -> str:
     """Generate an optimized investment plan within budget constraints.
-    
+
     Takes a list of investment candidates (asset interventions with costs and
     expected risk reductions) and a budget, then returns an optimized plan that
     maximizes total risk reduction within the budget.
-    
+
     **Note**: This operation may take several seconds as it performs optimization
     calculations.
-    
+
     Required scope: investments:write
-    
+
     Args:
-        params: Input parameters
-            - candidates (list): Investment options, each with:
-                - asset_id (str): The asset to invest in
-                - intervention_type (str): Type of intervention (e.g., "replace", "repair")
-                - cost (float): Cost of the intervention
-                - expected_risk_reduction (float): Expected risk reduction (0.0-1.0)
-            - budget (float): Total budget available (must be positive)
-            - horizon_months (int): Planning horizon in months (1-120, default: 12)
-            - response_format (str): "markdown" or "json"
-            
+        candidates: Investment options, each with asset_id, intervention_type, cost, and expected_risk_reduction (0.0-1.0)
+        budget: Total budget available (must be positive)
+        horizon_months: Planning horizon in months (1-120, default: 12)
+        response_format: Output format - "markdown" for human-readable or "json" for structured data
+
     Returns:
         Optimized investment plan with selected investments, budget usage,
         and total expected risk reduction
     """
     session_id = get_session_id_from_request()
+    params = OptimizeInvestmentsInput(
+        candidates=candidates,
+        budget=budget,
+        horizon_months=horizon_months,
+        response_format=response_format
+    )
     return await optimize_investments_tool(params, session_id)
 
 
